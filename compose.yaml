@@ -1,0 +1,10 @@
+services:
+  myproject:
+    image: myproject
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    environment:
+      NODE_ENV: production
+    ports:
+      - 4020:4020

@@ -8,8 +8,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
-const DEMO_EMAIL = 'demo@lacima.mx'
-const DEMO_PASSWORD = 'lacima2025'
+const DEMO_EMAIL = 'demo@lacimapadelclub.com'
+const DEMO_PASSWORD = 'lacima2026'
 
 export default function LoginPage() {
   const router = useRouter()

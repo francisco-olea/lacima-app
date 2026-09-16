@@ -23,14 +23,14 @@ import { cn } from '@/lib/utils'
 const PRIMARY_NAV = [
   { label: 'Punto de Venta', href: '/pos', icon: ShoppingCart, ready: true },
   { label: 'Inventario', href: '/inventario', icon: Boxes, ready: false },
-  { label: 'Membresías', href: '/membresias', icon: IdCard, ready: false },
+  { label: 'Membresías', href: '/membresias', icon: IdCard, ready: true },
 ]
 
 const MORE_NAV = [
   { label: 'Dashboard', href: '/', icon: LayoutDashboard, ready: true },
-  { label: 'Patrocinadores', href: '/patrocinadores', icon: Handshake, ready: false },
+  { label: 'Patrocinadores', href: '/patrocinadores', icon: Handshake, ready: true },
   { label: 'Reportes', href: '/reportes', icon: BarChart3, ready: false },
-  { label: 'Configuración', href: '/configuracion', icon: Settings, ready: false },
+  { label: 'Configuración', href: '/configuracion', icon: Settings, ready: true },
 ]
 
 function isActive(pathname: string, href: string) {
@@ -99,11 +99,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </header>
 
       {/* Page content — leaves space for bottom nav */}
-      <main className="flex-1 overflow-auto pb-20 p-4 md:p-6">{children}</main>
+      <main className="flex-1 overflow-auto px-4 pb-28 pt-4 md:px-6 md:pb-32 md:pt-6">{children}</main>
 
       {/* Bottom navigation */}
       <nav
-        className="fixed bottom-0 inset-x-0 z-30 flex items-stretch border-t border-sidebar-border bg-sidebar"
+        className="fixed inset-x-0 bottom-0 z-30 flex min-h-16 items-stretch border-t border-sidebar-border bg-sidebar pb-[env(safe-area-inset-bottom)]"
         aria-label="Navegación principal"
       >
         {PRIMARY_NAV.map((item) => {

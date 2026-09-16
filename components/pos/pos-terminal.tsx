@@ -16,7 +16,7 @@ import {
   CheckCircle2,
   Receipt,
 } from 'lucide-react'
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -41,24 +41,31 @@ type CartItem = {
   precio: number
   cantidad: number
   sinCodigo?: boolean
+  courtRental?: boolean
   /** timestamp used to trigger the slide-in animation per item */
   addedAt: number
 }
 
 type VentaTurno = {
+  id: string
   folio: string
   hora: string
+  fecha: string
   total: number
-  metodo: MetodoPago
+  metodo: MetodoPago | 'Mixto'
   items: number
+  pagadores: number
+  pagos: Pago[]
 }
 
 const categorias = ['Todos', 'Bebidas', 'Snacks', 'Equipo', 'Ropa', 'Servicios'] as const
 type Categoria = (typeof categorias)[number]
 type MetodoPago = 'Efectivo' | 'Tarjeta' | 'Transferencia'
 type PanelTab = 'carrito' | 'tickets'
+type Pago = { id: string; metodo: MetodoPago; monto: number }
 
-let folioCounter = 1043
+const SALES_STORAGE_KEY = 'lc-sales'
+const FOLIO_SEQUENCE_KEY = 'lc-folio-sequence'
 
 export function PosTerminal() {
   const [query, setQuery] = useState('')
@@ -67,12 +74,15 @@ export function PosTerminal() {
   const [descuento, setDescuento] = useState(0)
   const [metodo, setMetodo] = useState<MetodoPago>('Efectivo')
   const [recibido, setRecibido] = useState('')
+  const [paymentAmount, setPaymentAmount] = useState('')
+  const [payments, setPayments] = useState<Pago[]>([])
   const [checkoutOpen, setCheckoutOpen] = useState(false)
   const [manualOpen, setManualOpen] = useState(false)
   const [corteOpen, setCorteOpen] = useState(false)
   const [corteConfirmado, setCorteConfirmado] = useState(false)
   const [manualName, setManualName] = useState('')
   const [manualPrice, setManualPrice] = useState('')
+  const [splitPeople, setSplitPeople] = useState('1')
   const [panelTab, setPanelTab] = useState<PanelTab>('carrito')
 
   // Ventas acumuladas del turno actual
@@ -83,6 +93,13 @@ export function PosTerminal() {
   })
 
   const scanRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    const storedSequence = Number.parseInt(localStorage.getItem(FOLIO_SEQUENCE_KEY) ?? '', 10)
+    if (!Number.isFinite(storedSequence)) {
+      localStorage.setItem(FOLIO_SEQUENCE_KEY, '1042')
+    }
+  }, [])
 
   const filtered = useMemo(() => {
     return products.filter((p) => {
@@ -95,6 +112,8 @@ export function PosTerminal() {
   }, [query, categoria])
 
   function addProduct(p: Product) {
+    const isCourtRental = p.id === 'p11'
+    const isWeekend = [0, 6].includes(new Date().getDay())
     setCart((prev) => {
       const found = prev.find((i) => i.key === p.id)
       if (found) {
@@ -102,7 +121,7 @@ export function PosTerminal() {
           i.key === p.id ? { ...i, cantidad: i.cantidad + 1, addedAt: Date.now() } : i,
         )
       }
-      return [...prev, { key: p.id, nombre: p.nombre, precio: p.precio, cantidad: 1, addedAt: Date.now() }]
+      return [...prev, { key: p.id, nombre: p.nombre, precio: p.precio, cantidad: 1, courtRental: isCourtRental && isWeekend, addedAt: Date.now() }]
     })
     // Switch to carrito tab when adding a product
     setPanelTab('carrito')
@@ -161,33 +180,73 @@ export function PosTerminal() {
     toast.success('Producto sin código agregado')
   }
 
-  const subtotal = cart.reduce((a, i) => a + i.precio * i.cantidad, 0)
+  const lineTotal = (item: CartItem) => item.courtRental
+    ? Math.ceil(item.cantidad / 2) * item.precio
+    : item.precio * item.cantidad
+  const subtotal = cart.reduce((a, i) => a + lineTotal(i), 0)
   const descuentoMonto = Math.min(subtotal, (subtotal * descuento) / 100)
   const total = subtotal - descuentoMonto
-  const cambio = Math.max(0, (Number.parseFloat(recibido) || 0) - total)
+  const paidAmount = payments.reduce((sum, payment) => sum + payment.monto, 0)
+  const remainingAmount = Math.max(0, total - paidAmount)
+  const suggestedPayment = remainingAmount / Math.max(1, Number(splitPeople) - payments.length)
+  const paymentValue = Number.parseFloat(paymentAmount) || 0
+  const cambio = Math.max(0, (Number.parseFloat(recibido) || 0) - paymentValue)
 
   function cancelSale() {
     if (cart.length === 0) return
     setCart([])
     setDescuento(0)
     setRecibido('')
+    setSplitPeople('1')
+    setPaymentAmount('')
+    setPayments([])
     toast('Venta cancelada')
   }
 
   function confirmSale() {
-    if (metodo === 'Efectivo' && (Number.parseFloat(recibido) || 0) < total) {
+    const amount = paymentValue || remainingAmount
+    if (amount <= 0 || amount > remainingAmount + 0.01) {
+      toast.error('El monto debe ser mayor a cero y no superar el saldo pendiente')
+      return
+    }
+    if (metodo === 'Efectivo' && (Number.parseFloat(recibido) || 0) < amount) {
       toast.error('El monto recibido es insuficiente')
       return
     }
-    const folio = `V-${folioCounter++}`
+    const payment: Pago = { id: `${Date.now()}-${payments.length}`, metodo, monto: amount }
+    const updatedPayments = [...payments, payment]
+    const updatedPaidAmount = updatedPayments.reduce((sum, item) => sum + item.monto, 0)
+    setPayments(updatedPayments)
+    const updatedRemaining = Math.max(0, total - updatedPaidAmount)
+    if (updatedRemaining > 0.01) {
+      setPaymentAmount(updatedRemaining.toFixed(2))
+      setRecibido('')
+      toast.success('Pago registrado', { description: `Saldo pendiente: ${currency(updatedRemaining)}` })
+      return
+    }
+
+    const sequence = (Number.parseInt(localStorage.getItem(FOLIO_SEQUENCE_KEY) ?? '1042', 10) || 1042) + 1
+    const folio = `V-${sequence}`
+    localStorage.setItem(FOLIO_SEQUENCE_KEY, String(sequence))
     const now = new Date()
     const hora = now.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
+    const fecha = now.toISOString()
     const itemsCount = cart.reduce((a, i) => a + i.cantidad, 0)
+    const venta: VentaTurno = {
+      id: `${sequence}-${now.getTime()}`,
+      folio,
+      hora,
+      fecha,
+      total,
+      metodo: updatedPayments.length === 1 ? updatedPayments[0].metodo : 'Mixto',
+      items: itemsCount,
+      pagadores: Math.max(1, Number(splitPeople) || 1),
+      pagos: updatedPayments,
+    }
 
-    setVentasTurno((prev) => [
-      { folio, hora, total, metodo, items: itemsCount },
-      ...prev,
-    ])
+    setVentasTurno((prev) => [venta, ...prev])
+    const sales = JSON.parse(localStorage.getItem(SALES_STORAGE_KEY) ?? '[]') as VentaTurno[]
+    localStorage.setItem(SALES_STORAGE_KEY, JSON.stringify([venta, ...sales]))
 
     setCheckoutOpen(false)
     toast.success('Venta registrada · Ticket impreso', {
@@ -196,6 +255,14 @@ export function PosTerminal() {
     setCart([])
     setDescuento(0)
     setRecibido('')
+    setPaymentAmount('')
+    setSplitPeople('1')
+    setPayments([])
+  }
+
+  function openCheckout() {
+    setPaymentAmount(suggestedPayment.toFixed(2))
+    setCheckoutOpen(true)
   }
 
   function hacerCorte() {
@@ -207,7 +274,9 @@ export function PosTerminal() {
   const totalTurno = ventasTurno.reduce((a, v) => a + v.total, 0)
   const porMetodo = ventasTurno.reduce(
     (acc, v) => {
-      acc[v.metodo] = (acc[v.metodo] ?? 0) + v.total
+      if (v.metodo !== 'Mixto') {
+        acc[v.metodo] = (acc[v.metodo] ?? 0) + v.total
+      }
       return acc
     },
     {} as Record<MetodoPago, number>,
@@ -420,7 +489,7 @@ export function PosTerminal() {
                         </Button>
                       </div>
                       <p className="w-20 text-right text-sm font-semibold">
-                        {currency(i.precio * i.cantidad)}
+                        {currency(lineTotal(i))}
                       </p>
                       <button
                         aria-label="Eliminar"
@@ -475,7 +544,7 @@ export function PosTerminal() {
                 size="lg"
                 className="mt-3 h-12 w-full gap-2 text-base"
                 disabled={cart.length === 0}
-                onClick={() => setCheckoutOpen(true)}
+                onClick={openCheckout}
               >
                 <Banknote className="size-5" />
                 Cobrar {currency(total)}
@@ -574,12 +643,32 @@ export function PosTerminal() {
           <DialogHeader>
             <DialogTitle>Cobro</DialogTitle>
             <DialogDescription>
-              Total a pagar:{' '}
+              Total de la cuenta:{' '}
               <span className="font-semibold text-foreground">{currency(total)}</span>
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
+            <div className="rounded-xl border border-border bg-muted/40 p-4">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Pagado</span>
+                <span className="font-semibold text-accent">{currency(paidAmount)}</span>
+              </div>
+              <div className="mt-2 flex items-center justify-between text-base">
+                <span className="font-medium">Saldo pendiente</span>
+                <span className="font-bold text-primary">{currency(remainingAmount)}</span>
+              </div>
+              {payments.length > 0 && (
+                <div className="mt-3 space-y-1 border-t border-border pt-3 text-xs text-muted-foreground">
+                  {payments.map((payment, index) => (
+                    <div key={payment.id} className="flex justify-between">
+                      <span>Pago {index + 1} · {payment.metodo}</span>
+                      <span>{currency(payment.monto)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
             <div>
               <Label className="mb-2 block text-sm">Método de pago</Label>
               <div className="grid grid-cols-3 gap-2">
@@ -627,6 +716,47 @@ export function PosTerminal() {
                 </div>
               </div>
             )}
+            <div className="space-y-2">
+              <Label htmlFor="payment-amount" className="text-sm">Monto de este pago</Label>
+              <Input
+                id="payment-amount"
+                type="number"
+                min={0.01}
+                max={remainingAmount}
+                step="0.01"
+                inputMode="decimal"
+                value={paymentAmount}
+                onChange={(e) => setPaymentAmount(e.target.value)}
+                className="h-11 text-lg"
+              />
+              <button
+                type="button"
+                className="text-xs text-primary underline-offset-4 hover:underline"
+                onClick={() => setPaymentAmount(suggestedPayment.toFixed(2))}
+              >
+                Usar importe sugerido por persona: {currency(suggestedPayment)}
+              </button>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="split-people" className="text-sm">Personas que dividen el pago</Label>
+              <Input
+                id="split-people"
+                type="number"
+                min={1}
+                step={1}
+                value={splitPeople}
+                onChange={(e) => {
+                  const people = Math.max(1, Number(e.target.value) || 1)
+                  setSplitPeople(String(people))
+                  setPaymentAmount((remainingAmount / Math.max(1, people - payments.length)).toFixed(2))
+                }}
+                className="h-11"
+              />
+              <div className="flex justify-between rounded-lg bg-accent/10 px-3 py-2 text-sm">
+                <span className="text-muted-foreground">A pagar por persona</span>
+                <span className="font-semibold text-accent">{currency(total / Math.max(1, Number(splitPeople) || 1))}</span>
+              </div>
+            </div>
           </div>
 
           <DialogFooter className="gap-2 sm:gap-0">
@@ -635,7 +765,7 @@ export function PosTerminal() {
             </Button>
             <Button onClick={confirmSale} className="gap-2">
               <Printer className="size-4" />
-              Confirmar e imprimir
+              {remainingAmount > 0.01 ? 'Registrar pago' : 'Confirmar e imprimir'}
             </Button>
           </DialogFooter>
         </DialogContent>

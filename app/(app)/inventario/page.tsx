@@ -1,12 +1,13 @@
 'use client'
 
-import { Minus, Plus } from 'lucide-react'
+import { Minus, Plus, Save, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { currency, products as initialProducts, type Product } from '@/lib/data'
 
 const categorias = ['Todos', 'Bebidas', 'Snacks', 'Equipo', 'Ropa', 'Servicios'] as const
@@ -17,6 +18,8 @@ export default function InventarioPage() {
   const [search, setSearch] = useState('')
   const [categoria, setCategoria] = useState<Categoria>('Todos')
   const [items, setItems] = useState<Product[]>(() => initialProducts)
+  const [addOpen, setAddOpen] = useState(false)
+  const [newProduct, setNewProduct] = useState({ nombre: '', codigo: '', categoria: 'Bebidas' as Product['categoria'], precio: '', existencias: '0', inventarioMinimo: '0' })
 
   const filtered = useMemo(
     () =>
@@ -52,6 +55,17 @@ export default function InventarioPage() {
           : producto,
       ),
     )
+  }
+
+  function addProduct(event: React.FormEvent) {
+    event.preventDefault()
+    const price = Number(newProduct.precio)
+    const stock = Number(newProduct.existencias)
+    const minimum = Number(newProduct.inventarioMinimo)
+    if (!newProduct.nombre.trim() || !newProduct.codigo.trim() || !Number.isFinite(price) || price < 0) return
+    setItems((current) => [{ id: `p-${Date.now()}`, codigo: newProduct.codigo.trim(), nombre: newProduct.nombre.trim(), categoria: newProduct.categoria, precio: price, existencias: Math.max(0, stock || 0), inventarioMinimo: Math.max(0, minimum || 0), activo: true }, ...current])
+    setNewProduct({ nombre: '', codigo: '', categoria: 'Bebidas', precio: '', existencias: '0', inventarioMinimo: '0' })
+    setAddOpen(false)
   }
 
   return (
@@ -100,7 +114,8 @@ export default function InventarioPage() {
             </p>
           </div>
 
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" onClick={() => setAddOpen(true)} className="gap-2"><Plus className="size-4" /> Agregar</Button>
             {categorias.map((cat) => (
               <button
                 key={cat}
@@ -201,6 +216,18 @@ export default function InventarioPage() {
           </table>
         </div>
       </Card>
+
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Agregar producto</DialogTitle><DialogDescription>Registra un producto nuevo para el catálogo e inventario.</DialogDescription></DialogHeader>
+          <form onSubmit={addProduct} className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="new-name">Nombre</Label><Input id="new-name" required value={newProduct.nombre} onChange={(e) => setNewProduct({ ...newProduct, nombre: e.target.value })} /></div><div className="space-y-2"><Label htmlFor="new-code">Código</Label><Input id="new-code" required value={newProduct.codigo} onChange={(e) => setNewProduct({ ...newProduct, codigo: e.target.value })} /></div></div>
+            <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="new-category">Categoría</Label><select id="new-category" value={newProduct.categoria} onChange={(e) => setNewProduct({ ...newProduct, categoria: e.target.value as Product['categoria'] })} className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm">{categorias.filter((category) => category !== 'Todos').map((category) => <option key={category}>{category}</option>)}</select></div><div className="space-y-2"><Label htmlFor="new-price">Precio</Label><Input id="new-price" required type="number" min="0" step="0.01" value={newProduct.precio} onChange={(e) => setNewProduct({ ...newProduct, precio: e.target.value })} /></div></div>
+            <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="new-stock">Existencias</Label><Input id="new-stock" type="number" min="0" value={newProduct.existencias} onChange={(e) => setNewProduct({ ...newProduct, existencias: e.target.value })} /></div><div className="space-y-2"><Label htmlFor="new-minimum">Mínimo de inventario</Label><Input id="new-minimum" type="number" min="0" value={newProduct.inventarioMinimo} onChange={(e) => setNewProduct({ ...newProduct, inventarioMinimo: e.target.value })} /></div></div>
+            <DialogFooter><Button type="button" variant="outline" onClick={() => setAddOpen(false)}><X className="size-4" /> Cancelar</Button><Button type="submit"><Save className="size-4" /> Guardar producto</Button></DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -3,17 +3,25 @@
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { Eye, EyeOff, Lock, Mail } from 'lucide-react'
+import { Eye, EyeOff, Lock, UserRound } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
-const DEMO_EMAIL = 'demo@lacimapadelclub.com'
+const DEMO_USER = 'Fernanda'
 const DEMO_PASSWORD = 'lacima2026'
+
+const demoAccounts = [
+  { username: 'Fernanda', password: 'lacima2026', role: 'admin' },
+  { username: 'Denisse', password: 'CajaDenisse2026!', role: 'cashier' },
+  { username: 'Paola', password: 'CajaPaola2026!', role: 'cashier' },
+  { username: 'Jenny', password: 'CajaJenny2026!', role: 'cashier' },
+  { username: 'Andrea', password: 'CajaAndrea2026!', role: 'cashier' },
+] as const
 
 export default function LoginPage() {
   const router = useRouter()
-  const [email, setEmail] = useState('')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [showPass, setShowPass] = useState(false)
   const [error, setError] = useState('')
@@ -25,12 +33,16 @@ export default function LoginPage() {
     setLoading(true)
 
     setTimeout(() => {
-      if (
-        email.trim().toLowerCase() === DEMO_EMAIL &&
-        password === DEMO_PASSWORD
-      ) {
-        // Persist session flag
+      const account = demoAccounts.find(
+        (candidate) =>
+          candidate.username.toLowerCase() === username.trim().toLowerCase() &&
+          candidate.password === password,
+      )
+
+      if (account) {
         sessionStorage.setItem('lc-auth', '1')
+        sessionStorage.setItem('lc-user', account.username)
+        sessionStorage.setItem('lc-role', account.role)
         router.push('/pos')
       } else {
         setError('Credenciales incorrectas. Usa las credenciales de demo.')
@@ -40,7 +52,7 @@ export default function LoginPage() {
   }
 
   function fillDemo() {
-    setEmail(DEMO_EMAIL)
+    setUsername(DEMO_USER)
     setPassword(DEMO_PASSWORD)
     setError('')
   }
@@ -63,19 +75,19 @@ export default function LoginPage() {
         </div>
 
         <form onSubmit={handleLogin} className="space-y-4">
-          {/* Email */}
+          {/* Usuario */}
           <div className="space-y-1.5">
-            <Label htmlFor="email">Correo electrónico</Label>
+            <Label htmlFor="username">Usuario</Label>
             <div className="relative">
-              <Mail className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <UserRound className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
-                id="email"
-                type="email"
-                autoComplete="email"
+                id="username"
+                type="text"
+                autoComplete="username"
                 required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="correo@ejemplo.com"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="Escribe tu nombre"
                 className="h-11 pl-9"
               />
             </div>
@@ -127,12 +139,12 @@ export default function LoginPage() {
         {/* Demo credentials hint */}
         <div className="mt-6 rounded-xl border border-dashed border-border bg-muted/40 p-4">
           <p className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-            Credenciales de demo
+            Usuarios de demo
           </p>
           <div className="space-y-1 font-mono text-xs text-foreground/70">
             <p>
               <span className="text-muted-foreground">Usuario: </span>
-              {DEMO_EMAIL}
+              Fernanda / Denisse / Paola / Jenny / Andrea
             </p>
             <p>
               <span className="text-muted-foreground">Contraseña: </span>

@@ -67,6 +67,11 @@ CROSS JOIN (VALUES
   ('andrea@lacimapadelclub.com', 'Andrea', 'CajaAndrea2026!')
 ) AS seed(email, full_name, password)
 WHERE r.code = 'cashier'
+  AND NOT EXISTS (
+    SELECT 1 FROM app.users existing
+    WHERE lower(existing.full_name) = lower(seed.full_name)
+       OR existing.email = seed.email
+  )
 ON CONFLICT (email) DO UPDATE SET
   full_name = EXCLUDED.full_name,
   role_id = EXCLUDED.role_id,

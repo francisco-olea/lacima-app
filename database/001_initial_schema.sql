@@ -288,12 +288,24 @@ ON CONFLICT DO NOTHING;
 
 INSERT INTO app.users (role_id, email, full_name, password_hash)
 SELECT r.id, 'admin@lacimapadelclub.com', 'Administrador La Cima', crypt('AdminLacima2026!', gen_salt('bf', 12))
-FROM app.roles r WHERE r.code = 'admin'
+FROM app.roles r
+WHERE r.code = 'admin'
+  AND NOT EXISTS (
+    SELECT 1 FROM app.users u
+    WHERE u.email = 'admin@lacimapadelclub.com'
+       OR lower(u.full_name) IN ('administrador la cima', 'fernanda')
+  )
 ON CONFLICT (email) DO NOTHING;
 
 INSERT INTO app.users (role_id, email, full_name, password_hash)
 SELECT r.id, 'caja@lacimapadelclub.com', 'Caja La Cima', crypt('CajaLacima2026!', gen_salt('bf', 12))
-FROM app.roles r WHERE r.code = 'cashier'
+FROM app.roles r
+WHERE r.code = 'cashier'
+  AND NOT EXISTS (
+    SELECT 1 FROM app.users u
+    WHERE u.email = 'caja@lacimapadelclub.com'
+       OR lower(u.full_name) IN ('caja la cima', 'caja')
+  )
 ON CONFLICT (email) DO NOTHING;
 
 INSERT INTO app.cash_registers (code, name, location)

@@ -38,9 +38,9 @@ type SettingsState = {
 
 const defaultSettings: SettingsState = {
   clubName: 'La Cima Padel Club',
-  phone: '+52 55 0000 0000',
+  phone: '+52 0000 0000',
   email: 'contacto@lacimapadelclub.com',
-  address: 'Ciudad de México, México',
+  address: 'San Luis RC, Sonora',
   ticketHeader: 'La Cima Padel Club',
   ticketFooter: 'Gracias por tu visita',
   lowStockAlerts: true,
@@ -48,11 +48,11 @@ const defaultSettings: SettingsState = {
 }
 
 const users = [
-  { name: 'Fernanda', email: 'admin@lacimapadelclub.com', role: 'Administrador' },
-  { name: 'Denisse', email: 'denisse@lacimapadelclub.com', role: 'Caja' },
-  { name: 'Paola', email: 'paola@lacimapadelclub.com', role: 'Caja' },
-  { name: 'Jenny', email: 'jenny@lacimapadelclub.com', role: 'Caja' },
-  { name: 'Andrea', email: 'andrea@lacimapadelclub.com', role: 'Caja' },
+  { name: 'Fernanda', role: 'Administrador' },
+  { name: 'Denisse', role: 'Caja' },
+  { name: 'Paola', role: 'Caja' },
+  { name: 'Jenny', role: 'Caja' },
+  { name: 'Andrea', role: 'Caja' },
 ]
 
 const shifts = [
@@ -76,14 +76,14 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (val
 export default function ConfiguracionPage() {
   const [settings, setSettings] = useState<SettingsState>(defaultSettings)
   const [saved, setSaved] = useState(false)
-  const [nextFolio, setNextFolio] = useState(1043)
+  const [nextFolio, setNextFolio] = useState(1)
 
   useEffect(() => {
     const storedSettings = localStorage.getItem(SETTINGS_KEY)
     if (storedSettings) {
       setSettings({ ...defaultSettings, ...JSON.parse(storedSettings) })
     }
-    setNextFolio((Number(localStorage.getItem('lc-folio-sequence')) || 1042) + 1)
+    setNextFolio((Number(localStorage.getItem('lc-folio-sequence-v2')) || 0) + 1)
   }, [])
 
   function update<K extends keyof SettingsState>(key: K, value: SettingsState[K]) {
@@ -137,7 +137,7 @@ export default function ConfiguracionPage() {
           <Card className="p-5 sm:p-6">
             <div className="mb-5 flex items-center justify-between gap-3"><div className="flex items-center gap-3"><UserCog className="size-5 text-primary" /><div><h2 className="text-lg font-semibold">Usuarios y roles</h2><p className="text-sm text-muted-foreground">Controla quién puede operar cada módulo.</p></div></div><Button variant="outline" className="gap-2"><Users className="size-4" /> Nuevo usuario</Button></div>
             <div className="divide-y divide-border rounded-xl border border-border">
-              {users.map((user) => <div key={user.email} className="flex flex-wrap items-center gap-3 p-4"><div className="flex size-10 items-center justify-center rounded-full bg-primary/15 text-primary"><UserCog className="size-5" /></div><div className="min-w-0 flex-1"><p className="font-medium">{user.name}</p><p className="text-sm text-muted-foreground">{user.email}</p></div><Badge variant={user.role === 'Administrador' ? 'default' : 'secondary'}>{user.role}</Badge><Badge className="gap-1 bg-accent/15 text-accent"><Check className="size-3" /> Activo</Badge><Button variant="ghost" size="icon" aria-label={`Editar ${user.name}`}><KeyRound className="size-4" /></Button></div>)}
+              {users.map((user) => <div key={user.name} className="flex flex-wrap items-center gap-3 p-4"><div className="flex size-10 items-center justify-center rounded-full bg-primary/15 text-primary"><UserCog className="size-5" /></div><div className="min-w-0 flex-1"><p className="font-medium">{user.name}</p></div><Badge variant={user.role === 'Administrador' ? 'default' : 'secondary'}>{user.role}</Badge><Badge className="gap-1 bg-accent/15 text-accent"><Check className="size-3" /> Activo</Badge><Button variant="ghost" size="icon" aria-label={`Editar ${user.name}`}><KeyRound className="size-4" /></Button></div>)}
             </div>
             <p className="mt-4 text-sm text-muted-foreground">Los permisos definitivos se aplican desde PostgreSQL mediante los roles Administrador y Caja.</p>
             <div className="mt-6 border-t border-border pt-5">
@@ -157,7 +157,7 @@ export default function ConfiguracionPage() {
           <Card className="p-5 sm:p-6">
             <div className="mb-5 flex items-center gap-3"><ClipboardList className="size-5 text-primary" /><div><h2 className="text-lg font-semibold">Tickets y folios</h2><p className="text-sm text-muted-foreground">Configura la identificación de cada venta.</p></div></div>
             <div className="grid gap-4 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="ticket-header">Encabezado del ticket</Label><Input id="ticket-header" value={settings.ticketHeader} onChange={(e) => update('ticketHeader', e.target.value)} /></div><div className="space-y-2"><Label htmlFor="ticket-footer">Mensaje al final</Label><Input id="ticket-footer" value={settings.ticketFooter} onChange={(e) => update('ticketFooter', e.target.value)} /></div></div>
-            <div className="mt-5 rounded-xl border border-border bg-muted/40 p-4"><p className="text-sm font-semibold">Folio consecutivo</p><p className="mt-1 text-sm text-muted-foreground">Cada venta confirmada recibe un folio único con formato V-1043 y se conserva para los reportes.</p><div className="mt-3 flex items-center gap-2 font-mono text-xl font-semibold text-primary"><ClipboardList className="size-5" /> V-{(Number(localStorage.getItem('lc-folio-sequence')) || 1042) + 1}</div></div>
+            <div className="mt-5 rounded-xl border border-border bg-muted/40 p-4"><p className="text-sm font-semibold">Folio consecutivo</p><p className="mt-1 text-sm text-muted-foreground">Cada venta confirmada recibe un folio único de seis dígitos y se conserva para los reportes.</p><div className="mt-3 flex items-center gap-2 font-mono text-xl font-semibold text-primary"><ClipboardList className="size-5" /> {String(nextFolio).padStart(6, '0')}</div></div>
           </Card>
         </TabsContent>
 

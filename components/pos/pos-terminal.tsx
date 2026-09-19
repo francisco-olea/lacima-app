@@ -65,7 +65,7 @@ type PanelTab = 'carrito' | 'tickets'
 type Pago = { id: string; metodo: MetodoPago; monto: number }
 
 const SALES_STORAGE_KEY = 'lc-sales'
-const FOLIO_SEQUENCE_KEY = 'lc-folio-sequence'
+const FOLIO_SEQUENCE_KEY = 'lc-folio-sequence-v2'
 
 export function PosTerminal() {
   const [query, setQuery] = useState('')
@@ -83,6 +83,8 @@ export function PosTerminal() {
   const [manualName, setManualName] = useState('')
   const [manualPrice, setManualPrice] = useState('')
   const [splitPeople, setSplitPeople] = useState('1')
+  const [splitEnabled, setSplitEnabled] = useState(false)
+  const [printConfirmOpen, setPrintConfirmOpen] = useState(false)
   const [panelTab, setPanelTab] = useState<PanelTab>('carrito')
 
   // Ventas acumuladas del turno actual
@@ -97,7 +99,7 @@ export function PosTerminal() {
   useEffect(() => {
     const storedSequence = Number.parseInt(localStorage.getItem(FOLIO_SEQUENCE_KEY) ?? '', 10)
     if (!Number.isFinite(storedSequence)) {
-      localStorage.setItem(FOLIO_SEQUENCE_KEY, '1042')
+      localStorage.setItem(FOLIO_SEQUENCE_KEY, '0')
     }
   }, [])
 
@@ -225,8 +227,8 @@ export function PosTerminal() {
       return
     }
 
-    const sequence = (Number.parseInt(localStorage.getItem(FOLIO_SEQUENCE_KEY) ?? '1042', 10) || 1042) + 1
-    const folio = `V-${sequence}`
+    const sequence = (Number.parseInt(localStorage.getItem(FOLIO_SEQUENCE_KEY) ?? '0', 10) || 0) + 1
+    const folio = String(sequence).padStart(6, '0')
     localStorage.setItem(FOLIO_SEQUENCE_KEY, String(sequence))
     const now = new Date()
     const hora = now.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
@@ -240,7 +242,7 @@ export function PosTerminal() {
       total,
       metodo: updatedPayments.length === 1 ? updatedPayments[0].metodo : 'Mixto',
       items: itemsCount,
-      pagadores: Math.max(1, Number(splitPeople) || 1),
+      pagadores: splitEnabled ? Math.max(2, Number(splitPeople) || 2) : 1,
       pagos: updatedPayments,
     }
 
@@ -249,7 +251,8 @@ export function PosTerminal() {
     localStorage.setItem(SALES_STORAGE_KEY, JSON.stringify([venta, ...sales]))
 
     setCheckoutOpen(false)
-    toast.success('Venta registrada · Ticket impreso', {
+    setPrintConfirmOpen(true)
+    toast.success('Venta registrada', {
       description: `${itemsCount} artículos · ${currency(total)}`,
     })
     setCart([])
@@ -258,6 +261,12 @@ export function PosTerminal() {
     setPaymentAmount('')
     setSplitPeople('1')
     setPayments([])
+    setSplitEnabled(false)
+  }
+
+  function sendToPrint() {
+    setPrintConfirmOpen(false)
+    toast.success('Comprobante enviado a imprimir')
   }
 
   function openCheckout() {
@@ -639,12 +648,12 @@ export function PosTerminal() {
 
       {/* Diálogo de cobro */}
       <Dialog open={checkoutOpen} onOpenChange={setCheckoutOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Cobro</DialogTitle>
-            <DialogDescription>
-              Total de la cuenta:{' '}
-              <span className="font-semibold text-foreground">{currency(total)}</span>
+            <DialogDescription className="rounded-xl border border-primary/30 bg-primary/10 px-4 py-3">
+              <span className="block text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Total a cobrar</span>
+              <span className="mt-1 block text-4xl font-bold tracking-tight text-primary sm:text-5xl">{currency(total)}</span>
             </DialogDescription>
           </DialogHeader>
 
@@ -737,25 +746,44 @@ export function PosTerminal() {
                 Usar importe sugerido por persona: {currency(suggestedPayment)}
               </button>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="split-people" className="text-sm">Personas que dividen el pago</Label>
-              <Input
-                id="split-people"
-                type="number"
-                min={1}
-                step={1}
-                value={splitPeople}
-                onChange={(e) => {
-                  const people = Math.max(1, Number(e.target.value) || 1)
-                  setSplitPeople(String(people))
-                  setPaymentAmount((remainingAmount / Math.max(1, people - payments.length)).toFixed(2))
-                }}
-                className="h-11"
-              />
-              <div className="flex justify-between rounded-lg bg-accent/10 px-3 py-2 text-sm">
-                <span className="text-muted-foreground">A pagar por persona</span>
-                <span className="font-semibold text-accent">{currency(total / Math.max(1, Number(splitPeople) || 1))}</span>
-              </div>
+            <div className="space-y-3 rounded-xl border border-border p-4">
+              <label className="flex cursor-pointer items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={splitEnabled}
+                  onChange={(e) => {
+                    const enabled = e.target.checked
+                    setSplitEnabled(enabled)
+                    const people = enabled ? 2 : 1
+                    setSplitPeople(String(people))
+                    setPaymentAmount((remainingAmount / Math.max(1, people - payments.length)).toFixed(2))
+                  }}
+                  className="size-5 accent-[var(--gold)]"
+                />
+                <span className="text-sm font-semibold">Dividir la cuenta entre varias personas</span>
+              </label>
+              {splitEnabled && (
+                <div className="space-y-2 pl-8">
+                  <Label htmlFor="split-people" className="text-sm">Número de personas</Label>
+                  <Input
+                    id="split-people"
+                    type="number"
+                    min={2}
+                    step={1}
+                    value={splitPeople}
+                    onChange={(e) => {
+                      const people = Math.max(2, Number(e.target.value) || 2)
+                      setSplitPeople(String(people))
+                      setPaymentAmount((remainingAmount / Math.max(1, people - payments.length)).toFixed(2))
+                    }}
+                    className="h-11"
+                  />
+                  <div className="flex justify-between rounded-lg bg-accent/10 px-3 py-2 text-sm">
+                    <span className="text-muted-foreground">A pagar por persona</span>
+                    <span className="font-semibold text-accent">{currency(total / Math.max(2, Number(splitPeople) || 2))}</span>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -766,6 +794,26 @@ export function PosTerminal() {
             <Button onClick={confirmSale} className="gap-2">
               <Printer className="size-4" />
               {remainingAmount > 0.01 ? 'Registrar pago' : 'Confirmar e imprimir'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={printConfirmOpen} onOpenChange={setPrintConfirmOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Enviar a imprimir comprobante</DialogTitle>
+            <DialogDescription>
+              La cuenta fue liquidada correctamente. ¿Deseas enviar el comprobante a la impresora?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setPrintConfirmOpen(false)}>
+              Ahora no
+            </Button>
+            <Button onClick={sendToPrint} className="gap-2">
+              <Printer className="size-4" />
+              Enviar a imprimir
             </Button>
           </DialogFooter>
         </DialogContent>

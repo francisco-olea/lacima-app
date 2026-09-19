@@ -22,14 +22,14 @@ import { cn } from '@/lib/utils'
 
 const PRIMARY_NAV = [
   { label: 'Punto de Venta', href: '/pos', icon: ShoppingCart, ready: true },
-  { label: 'Inventario', href: '/inventario', icon: Boxes, ready: false },
+  { label: 'Inventario', href: '/inventario', icon: Boxes, ready: true },
   { label: 'Membresías', href: '/membresias', icon: IdCard, ready: true },
 ]
 
 const MORE_NAV = [
   { label: 'Dashboard', href: '/', icon: LayoutDashboard, ready: true },
   { label: 'Patrocinadores', href: '/patrocinadores', icon: Handshake, ready: true },
-  { label: 'Reportes', href: '/reportes', icon: BarChart3, ready: false },
+  { label: 'Reportes', href: '/reportes', icon: BarChart3, ready: true },
   { label: 'Configuración', href: '/configuracion', icon: Settings, ready: true },
 ]
 
@@ -41,12 +41,25 @@ function isActive(pathname: string, href: string) {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const [moreOpen, setMoreOpen] = useState(false)
+  const [role, setRole] = useState<'admin' | 'cashier'>('admin')
+  const [username, setUsername] = useState('Fernanda')
   const moreRef = useRef<HTMLDivElement>(null)
 
+  useEffect(() => {
+    const storedRole = sessionStorage.getItem('lc-role')
+    const storedUsername = sessionStorage.getItem('lc-user')
+    if (storedRole === 'cashier' || storedRole === 'admin') setRole(storedRole)
+    if (storedUsername) setUsername(storedUsername)
+  }, [])
+
+  const isAdmin = role === 'admin'
+  const visiblePrimaryNav = isAdmin ? PRIMARY_NAV : PRIMARY_NAV.filter((item) => item.href === '/pos')
+  const visibleMoreNav = isAdmin ? MORE_NAV : []
+
   // Find current page label
-  const allNav = [...PRIMARY_NAV, ...MORE_NAV]
+  const allNav = [...visiblePrimaryNav, ...visibleMoreNav]
   const current = allNav.find((i) => isActive(pathname, i.href))
-  const moreIsActive = MORE_NAV.some((i) => isActive(pathname, i.href))
+  const moreIsActive = visibleMoreNav.some((i) => isActive(pathname, i.href))
 
   // Close "Más" popover on outside click
   useEffect(() => {
@@ -91,7 +104,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="ml-1 flex items-center gap-2 rounded-full border border-border bg-card px-2.5 py-1.5">
             <Avatar className="size-6">
               <AvatarFallback className="bg-primary text-primary-foreground text-[10px] font-bold">
-                FB
+                {username.slice(0, 2).toUpperCase()}
               </AvatarFallback>
             </Avatar>
           </div>
@@ -106,7 +119,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         className="fixed inset-x-0 bottom-0 z-30 flex min-h-16 items-stretch border-t border-sidebar-border bg-sidebar pb-[env(safe-area-inset-bottom)]"
         aria-label="Navegación principal"
       >
-        {PRIMARY_NAV.map((item) => {
+        {visiblePrimaryNav.map((item) => {
           const active = isActive(pathname, item.href)
           const Icon = item.icon
           return (
@@ -155,7 +168,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               role="menu"
               className="absolute bottom-full right-0 mb-1 w-52 rounded-xl border border-sidebar-border bg-sidebar shadow-2xl shadow-black/40 overflow-hidden"
             >
-              {MORE_NAV.map((item) => {
+              {visibleMoreNav.map((item) => {
                 const active = isActive(pathname, item.href)
                 const Icon = item.icon
                 return (

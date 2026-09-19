@@ -9,8 +9,11 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const authed = sessionStorage.getItem('lc-auth')
-    if (!authed) {
+    const role = sessionStorage.getItem('lc-role')
+    if (!authed || (role !== 'admin' && role !== 'cashier')) {
       router.replace('/login')
+    } else if (role === 'cashier' && window.location.pathname !== '/pos') {
+      router.replace('/pos')
     } else {
       setReady(true)
     }

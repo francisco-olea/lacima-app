@@ -205,7 +205,7 @@ export function PosTerminal() {
     toast('Venta cancelada')
   }
 
-  function confirmSale() {
+  async function confirmSale() {
     const amount = paymentValue || remainingAmount
     if (amount <= 0 || amount > remainingAmount + 0.01) {
       toast.error('El monto debe ser mayor a cero y no superar el saldo pendiente')
@@ -228,7 +228,7 @@ export function PosTerminal() {
     }
 
     const sequence = (Number.parseInt(localStorage.getItem(FOLIO_SEQUENCE_KEY) ?? '0', 10) || 0) + 1
-    const folio = String(sequence).padStart(6, '0')
+    const folio = `V-${String(sequence).padStart(6, '0')}`
     localStorage.setItem(FOLIO_SEQUENCE_KEY, String(sequence))
     const now = new Date()
     const hora = now.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
@@ -244,6 +244,38 @@ export function PosTerminal() {
       items: itemsCount,
       pagadores: splitEnabled ? Math.max(2, Number(splitPeople) || 2) : 1,
       pagos: updatedPayments,
+    }
+
+    const response = await fetch('/api/sales', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        folio,
+        subtotal,
+        discountAmount: descuentoMonto,
+        total,
+        payersCount: venta.pagadores,
+        items: cart.map((item) => {
+          const product = products.find((candidate) => candidate.id === item.key)
+          const itemLineTotal = lineTotal(item)
+          return {
+            sku: product?.codigo ?? null,
+            description: item.nombre,
+            quantity: item.cantidad,
+            unitPrice: item.precio,
+            discountAmount: item.precio * item.cantidad - itemLineTotal,
+            lineTotal: itemLineTotal,
+          }
+        }),
+        payments: updatedPayments.map((item) => ({
+          method: item.metodo === 'Efectivo' ? 'cash' : item.metodo === 'Tarjeta' ? 'card' : 'transfer',
+          amount: item.monto,
+        })),
+      }),
+    })
+    if (!response.ok) {
+      toast.error((await response.json()).error ?? 'No se pudo registrar la venta')
+      return
     }
 
     setVentasTurno((prev) => [venta, ...prev])

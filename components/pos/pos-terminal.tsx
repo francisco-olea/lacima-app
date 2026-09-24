@@ -274,7 +274,15 @@ export function PosTerminal() {
       }),
     })
     if (!response.ok) {
-      toast.error((await response.json()).error ?? 'No se pudo registrar la venta')
+      const responseText = await response.text()
+      let errorMessage = 'No se pudo registrar la venta'
+      try {
+        const responseBody = JSON.parse(responseText) as { error?: string }
+        errorMessage = responseBody.error ?? errorMessage
+      } catch {
+        // Mantiene un mensaje útil aunque el servidor responda con texto no JSON.
+      }
+      toast.error(errorMessage)
       return
     }
 
@@ -751,9 +759,22 @@ export function PosTerminal() {
                   placeholder="0.00"
                   className="h-11 text-lg"
                 />
-                <div className="flex justify-between rounded-lg bg-muted px-3 py-2 text-sm">
-                  <span className="text-muted-foreground">Cambio</span>
-                  <span className="font-semibold">{currency(cambio)}</span>
+                <div
+                  aria-live="polite"
+                  className={cn(
+                    'flex items-center justify-between rounded-xl border px-4 py-3',
+                    cambio > 0
+                      ? 'border-accent/40 bg-accent/10'
+                      : 'border-border bg-muted',
+                  )}
+                >
+                  <span className="text-base font-semibold">Cambio</span>
+                  <span className={cn(
+                    'text-3xl font-bold tracking-tight sm:text-4xl',
+                    cambio > 0 ? 'text-accent' : 'text-muted-foreground',
+                  )}>
+                    {currency(cambio)}
+                  </span>
                 </div>
               </div>
             )}

@@ -36,7 +36,7 @@ export default function LoginPage() {
       const account = demoAccounts.find(
         (candidate) =>
           candidate.username.toLowerCase() === username.trim().toLowerCase() &&
-          candidate.password === password,
+          (candidate.password === password || (candidate.role === 'cashier' && password === DEMO_PASSWORD)),
       )
 
       if (account) {

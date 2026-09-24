@@ -1,10 +1,11 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter()
+  const pathname = usePathname()
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
@@ -12,12 +13,12 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     const role = sessionStorage.getItem('lc-role')
     if (!authed || (role !== 'admin' && role !== 'cashier')) {
       router.replace('/login')
-    } else if (role === 'cashier' && window.location.pathname !== '/pos') {
+    } else if (role === 'cashier' && pathname !== '/pos') {
       router.replace('/pos')
     } else {
       setReady(true)
     }
-  }, [router])
+  }, [pathname, router])
 
   if (!ready) return null
   return <>{children}</>

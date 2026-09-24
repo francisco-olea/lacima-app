@@ -28,8 +28,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Venta incompleta' }, { status: 400 })
   }
 
-  const client = await db.connect()
+  let client: Awaited<ReturnType<typeof db.connect>> | undefined
   try {
+    client = await db.connect()
     await client.query('BEGIN')
     const cashier = await client.query<{ id: string }>(`
       SELECT u.id
@@ -88,10 +89,10 @@ export async function POST(request: Request) {
     await client.query('COMMIT')
     return NextResponse.json({ id: sale.rows[0].id, folio: body.folio }, { status: 201 })
   } catch (error) {
-    await client.query('ROLLBACK')
+    if (client) await client.query('ROLLBACK')
     const message = error instanceof Error ? error.message : 'No se pudo registrar la venta'
-    return NextResponse.json({ error: message }, { status: 400 })
+    return NextResponse.json({ error: message }, { status: client ? 400 : 503 })
   } finally {
-    client.release()
+    client?.release()
   }
 }

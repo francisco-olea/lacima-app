@@ -8,17 +8,6 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
-const DEMO_USER = 'Fernanda'
-const DEMO_PASSWORD = 'lacima2026'
-
-const demoAccounts = [
-  { username: 'Fernanda', password: 'lacima2026', role: 'admin' },
-  { username: 'Denisse', password: 'CajaDenisse2026!', role: 'cashier' },
-  { username: 'Paola', password: 'CajaPaola2026!', role: 'cashier' },
-  { username: 'Jenny', password: 'CajaJenny2026!', role: 'cashier' },
-  { username: 'Andrea', password: 'CajaAndrea2026!', role: 'cashier' },
-] as const
-
 export default function LoginPage() {
   const router = useRouter()
   const [username, setUsername] = useState('')
@@ -27,34 +16,28 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
-  function handleLogin(e: React.FormEvent) {
+  async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
     setError('')
     setLoading(true)
 
-    setTimeout(() => {
-      const account = demoAccounts.find(
-        (candidate) =>
-          candidate.username.toLowerCase() === username.trim().toLowerCase() &&
-          (candidate.password === password || (candidate.role === 'cashier' && password === DEMO_PASSWORD)),
-      )
-
-      if (account) {
-        sessionStorage.setItem('lc-auth', '1')
-        sessionStorage.setItem('lc-user', account.username)
-        sessionStorage.setItem('lc-role', account.role)
-        router.push('/pos')
-      } else {
-        setError('Credenciales incorrectas. Usa las credenciales de demo.')
-        setLoading(false)
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      })
+      const result = await response.json() as { error?: string }
+      if (!response.ok) {
+        setError(result.error ?? 'No se pudo iniciar sesión')
+        return
       }
-    }, 600)
-  }
-
-  function fillDemo() {
-    setUsername(DEMO_USER)
-    setPassword(DEMO_PASSWORD)
-    setError('')
+      router.push('/pos')
+    } catch {
+      setError('No se pudo conectar con el servidor')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -136,31 +119,6 @@ export default function LoginPage() {
           </Button>
         </form>
 
-        {/* Demo credentials hint */}
-        <div className="mt-6 rounded-xl border border-dashed border-border bg-muted/40 p-4">
-          <p className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-            Usuarios de demo
-          </p>
-          <div className="space-y-1 font-mono text-xs text-foreground/70">
-            <p>
-              <span className="text-muted-foreground">Usuario: </span>
-              Fernanda / Denisse / Paola / Jenny / Andrea
-            </p>
-            <p>
-              <span className="text-muted-foreground">Contraseña: </span>
-              {DEMO_PASSWORD}
-            </p>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="mt-3 h-8 w-full text-xs"
-            type="button"
-            onClick={fillDemo}
-          >
-            Autocompletar
-          </Button>
-        </div>
       </div>
 
       <p className="mt-6 text-xs text-muted-foreground">

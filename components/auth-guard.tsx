@@ -9,15 +9,25 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
-    const authed = sessionStorage.getItem('lc-auth')
-    const role = sessionStorage.getItem('lc-role')
-    if (!authed || (role !== 'admin' && role !== 'cashier')) {
-      router.replace('/login')
-    } else if (role === 'cashier' && pathname !== '/pos') {
-      router.replace('/pos')
-    } else {
-      setReady(true)
-    }
+    let active = true
+    setReady(false)
+    fetch('/api/auth/session', { cache: 'no-store' })
+      .then(async (response) => {
+        if (!response.ok) {
+          router.replace('/login')
+          return
+        }
+        const user = await response.json() as { role?: string }
+        if (user.role === 'cashier' && pathname !== '/pos') {
+          router.replace('/pos')
+        } else if (user.role === 'admin' || user.role === 'cashier') {
+          if (active) setReady(true)
+        } else {
+          router.replace('/login')
+        }
+      })
+      .catch(() => router.replace('/login'))
+    return () => { active = false }
   }, [pathname, router])
 
   if (!ready) return null

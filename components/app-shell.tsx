@@ -2,7 +2,7 @@
 
 import Image from 'next/image'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import {
   BarChart3,
   Boxes,
@@ -10,15 +10,31 @@ import {
   Handshake,
   IdCard,
   LayoutDashboard,
+  LogOut,
   Settings,
   ShoppingCart,
   Wifi,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 
 const PRIMARY_NAV = [
   { label: 'Punto de Venta', href: '/pos', icon: ShoppingCart, ready: true },
@@ -40,16 +56,23 @@ function isActive(pathname: string, href: string) {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
+  const router = useRouter()
   const [moreOpen, setMoreOpen] = useState(false)
-  const [role, setRole] = useState<'admin' | 'cashier'>('admin')
-  const [username, setUsername] = useState('Fernanda')
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false)
+  const [loggingOut, setLoggingOut] = useState(false)
+  const [role, setRole] = useState<'admin' | 'cashier'>('cashier')
+  const [username, setUsername] = useState('Usuario')
   const moreRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    const storedRole = sessionStorage.getItem('lc-role')
-    const storedUsername = sessionStorage.getItem('lc-user')
-    if (storedRole === 'cashier' || storedRole === 'admin') setRole(storedRole)
-    if (storedUsername) setUsername(storedUsername)
+    fetch('/api/auth/session', { cache: 'no-store' })
+      .then(async (response) => {
+        if (!response.ok) return
+        const user = await response.json() as { role?: 'admin' | 'cashier'; username?: string }
+        if (user.role) setRole(user.role)
+        if (user.username) setUsername(user.username)
+      })
+      .catch((error: unknown) => console.error('No se pudo cargar el usuario actual', error))
   }, [])
 
   const isAdmin = role === 'admin'
@@ -60,6 +83,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const allNav = [...visiblePrimaryNav, ...visibleMoreNav]
   const current = allNav.find((i) => isActive(pathname, i.href))
   const moreIsActive = visibleMoreNav.some((i) => isActive(pathname, i.href))
+
+  async function handleLogout() {
+    setLoggingOut(true)
+    try {
+      const response = await fetch('/api/auth/logout', { method: 'POST' })
+      const result = await response.json() as { error?: string }
+      if (!response.ok) throw new Error(result.error ?? 'No se pudo cerrar sesión')
+      setLogoutConfirmOpen(false)
+      router.replace('/login')
+      router.refresh()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo cerrar sesión')
+    } finally {
+      setLoggingOut(false)
+    }
+  }
 
   // Close "Más" popover on outside click
   useEffect(() => {
@@ -101,15 +140,46 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             En línea
           </span>
           <ThemeToggle />
-          <div className="ml-1 flex items-center gap-2 rounded-full border border-border bg-card px-2.5 py-1.5">
-            <Avatar className="size-6">
-              <AvatarFallback className="bg-primary text-primary-foreground text-[10px] font-bold">
-                {username.slice(0, 2).toUpperCase()}
-              </AvatarFallback>
-            </Avatar>
-          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              aria-label={`Menú de usuario: ${username}`}
+              className="ml-1 flex items-center gap-2 rounded-full border border-border bg-card px-2.5 py-1.5 outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <Avatar className="size-6">
+                <AvatarFallback className="bg-primary text-primary-foreground text-[10px] font-bold">
+                  {username.slice(0, 2).toUpperCase()}
+                </AvatarFallback>
+              </Avatar>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuItem
+                variant="destructive"
+                onClick={() => setLogoutConfirmOpen(true)}
+              >
+                <LogOut />
+                Cerrar sesión
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </header>
+
+      <Dialog open={logoutConfirmOpen} onOpenChange={(open) => !loggingOut && setLogoutConfirmOpen(open)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirmar cierre de sesión</DialogTitle>
+            <DialogDescription>¿Estás seguro de que quieres cerrar sesión?</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" disabled={loggingOut} onClick={() => setLogoutConfirmOpen(false)}>
+              Cancelar
+            </Button>
+            <Button type="button" variant="destructive" disabled={loggingOut} onClick={handleLogout}>
+              {loggingOut ? 'Cerrando sesión…' : 'Sí, cerrar sesión'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Page content — leaves space for bottom nav */}
       <main className="flex-1 overflow-auto px-4 pb-28 pt-4 md:px-6 md:pb-32 md:pt-6">{children}</main>

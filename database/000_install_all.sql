@@ -9,3 +9,4 @@
 \ir 006_catalog_updates.sql
 \ir 007_admin_and_passwords.sql
 \ir 008_cashier_pos_only.sql
+\ir 009_user_management_sessions.sql

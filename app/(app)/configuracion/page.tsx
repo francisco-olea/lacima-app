@@ -6,12 +6,14 @@ import {
   Building2,
   Check,
   ClipboardList,
-  KeyRound,
   Mail,
+  Pencil,
+  Plus,
   Printer,
   Save,
   Settings,
   ShieldCheck,
+  Trash2,
   UserCog,
   Users,
 } from 'lucide-react'
@@ -47,13 +49,7 @@ const defaultSettings: SettingsState = {
   emailReports: false,
 }
 
-const users = [
-  { name: 'Fernanda', role: 'Administrador' },
-  { name: 'Denisse', role: 'Caja' },
-  { name: 'Paola', role: 'Caja' },
-  { name: 'Jenny', role: 'Caja' },
-  { name: 'Andrea', role: 'Caja' },
-]
+type CashierUser = { id: string; name: string }
 
 const shifts = [
   { label: 'Lunes a viernes · mañana', time: '06:00 - 14:00' },
@@ -77,6 +73,15 @@ export default function ConfiguracionPage() {
   const [settings, setSettings] = useState<SettingsState>(defaultSettings)
   const [saved, setSaved] = useState(false)
   const [nextFolio, setNextFolio] = useState(1)
+  const [cashierUsers, setCashierUsers] = useState<CashierUser[]>([])
+  const [userForm, setUserForm] = useState<{ id: string | null; name: string; password: string }>({
+    id: null,
+    name: '',
+    password: '',
+  })
+  const [showUserForm, setShowUserForm] = useState(false)
+  const [loadingUsers, setLoadingUsers] = useState(true)
+  const [savingUser, setSavingUser] = useState(false)
 
   useEffect(() => {
     const storedSettings = localStorage.getItem(SETTINGS_KEY)
@@ -84,6 +89,14 @@ export default function ConfiguracionPage() {
       setSettings({ ...defaultSettings, ...JSON.parse(storedSettings) })
     }
     setNextFolio((Number(localStorage.getItem('lc-folio-sequence-v2')) || 0) + 1)
+    fetch('/api/users', { cache: 'no-store' })
+      .then(async (response) => {
+        const result = await response.json() as { users?: CashierUser[]; error?: string }
+        if (!response.ok) throw new Error(result.error ?? 'No se pudieron cargar los usuarios')
+        setCashierUsers(result.users ?? [])
+      })
+      .catch((error: unknown) => toast.error(error instanceof Error ? error.message : 'No se pudieron cargar los usuarios'))
+      .finally(() => setLoadingUsers(false))
   }, [])
 
   function update<K extends keyof SettingsState>(key: K, value: SettingsState[K]) {
@@ -95,6 +108,60 @@ export default function ConfiguracionPage() {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings))
     setSaved(true)
     toast.success('Configuración guardada')
+  }
+
+  function openNewUserForm() {
+    setUserForm({ id: null, name: '', password: '' })
+    setShowUserForm(true)
+  }
+
+  function openEditUserForm(user: CashierUser) {
+    setUserForm({ id: user.id, name: user.name, password: '' })
+    setShowUserForm(true)
+  }
+
+  async function saveUser(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setSavingUser(true)
+    try {
+      const response = await fetch('/api/users', {
+        method: userForm.id ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(userForm),
+      })
+      const result = await response.json() as { user?: CashierUser; error?: string }
+      if (!response.ok) throw new Error(result.error ?? 'No se pudo guardar el usuario')
+      if (result.user) {
+        const savedUser = result.user
+        setCashierUsers((current) => userForm.id
+          ? current.map((user) => user.id === savedUser.id ? savedUser : user)
+          : [...current, savedUser].sort((a, b) => a.name.localeCompare(b.name, 'es')))
+      }
+      setShowUserForm(false)
+      setUserForm({ id: null, name: '', password: '' })
+      toast.success(userForm.id ? 'Usuario actualizado' : 'Usuario creado')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo guardar el usuario')
+    } finally {
+      setSavingUser(false)
+    }
+  }
+
+  async function deleteUser(user: CashierUser) {
+    if (!window.confirm(`¿Quieres eliminar el usuario ${user.name}?`)) return
+    try {
+      const response = await fetch('/api/users', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: user.id }),
+      })
+      const result = await response.json() as { error?: string }
+      if (!response.ok) throw new Error(result.error ?? 'No se pudo eliminar el usuario')
+      setCashierUsers((current) => current.filter((item) => item.id !== user.id))
+      toast.success('Usuario eliminado')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo eliminar el usuario')
+    }
   }
 
   return (
@@ -135,11 +202,30 @@ export default function ConfiguracionPage() {
 
         <TabsContent value="usuarios">
           <Card className="p-5 sm:p-6">
-            <div className="mb-5 flex items-center justify-between gap-3"><div className="flex items-center gap-3"><UserCog className="size-5 text-primary" /><div><h2 className="text-lg font-semibold">Usuarios y roles</h2><p className="text-sm text-muted-foreground">Controla quién puede operar cada módulo.</p></div></div><Button variant="outline" className="gap-2"><Users className="size-4" /> Nuevo usuario</Button></div>
+            <div className="mb-5 flex items-center justify-between gap-3"><div className="flex items-center gap-3"><UserCog className="size-5 text-primary" /><div><h2 className="text-lg font-semibold">Usuarios y roles</h2><p className="text-sm text-muted-foreground">Controla quién puede operar cada módulo.</p></div></div><Button variant="outline" className="gap-2" onClick={openNewUserForm}><Plus className="size-4" /> Nuevo usuario</Button></div>
+            {showUserForm && (
+              <form onSubmit={saveUser} className="mb-5 space-y-4 rounded-xl border border-border bg-muted/30 p-4">
+                <h3 className="font-semibold">{userForm.id ? 'Editar usuario de Caja' : 'Nuevo usuario de Caja'}</h3>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="cashier-name">Nombre de usuario</Label>
+                    <Input id="cashier-name" autoComplete="off" required maxLength={80} value={userForm.name} onChange={(event) => setUserForm((current) => ({ ...current, name: event.target.value }))} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="cashier-password">{userForm.id ? 'Nueva contraseña (opcional)' : 'Contraseña'}</Label>
+                    <Input id="cashier-password" type="password" autoComplete="new-password" minLength={8} maxLength={72} required={!userForm.id} value={userForm.password} onChange={(event) => setUserForm((current) => ({ ...current, password: event.target.value }))} placeholder={userForm.id ? 'Dejar en blanco para conservarla' : 'Entre 8 y 72 caracteres'} />
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button type="button" variant="outline" onClick={() => setShowUserForm(false)}>Cancelar</Button>
+                  <Button type="submit" disabled={savingUser}>{savingUser ? 'Guardando…' : 'Guardar usuario'}</Button>
+                </div>
+              </form>
+            )}
             <div className="divide-y divide-border rounded-xl border border-border">
-              {users.map((user) => <div key={user.name} className="flex flex-wrap items-center gap-3 p-4"><div className="flex size-10 items-center justify-center rounded-full bg-primary/15 text-primary"><UserCog className="size-5" /></div><div className="min-w-0 flex-1"><p className="font-medium">{user.name}</p></div><Badge variant={user.role === 'Administrador' ? 'default' : 'secondary'}>{user.role}</Badge><Badge className="gap-1 bg-accent/15 text-accent"><Check className="size-3" /> Activo</Badge><Button variant="ghost" size="icon" aria-label={`Editar ${user.name}`}><KeyRound className="size-4" /></Button></div>)}
+              {loadingUsers ? <p className="p-4 text-sm text-muted-foreground">Cargando usuarios…</p> : cashierUsers.length === 0 ? <p className="p-4 text-sm text-muted-foreground">No hay usuarios de Caja registrados.</p> : cashierUsers.map((user) => <div key={user.id} className="flex flex-wrap items-center gap-3 p-4"><div className="flex size-10 items-center justify-center rounded-full bg-primary/15 text-primary"><UserCog className="size-5" /></div><div className="min-w-0 flex-1"><p className="font-medium">{user.name}</p></div><Badge variant="secondary">Caja</Badge><Badge className="gap-1 bg-accent/15 text-accent"><Check className="size-3" /> Activo</Badge><Button variant="ghost" size="icon" aria-label={`Editar ${user.name}`} onClick={() => openEditUserForm(user)}><Pencil className="size-4" /></Button><Button variant="ghost" size="icon" aria-label={`Eliminar ${user.name}`} onClick={() => deleteUser(user)}><Trash2 className="size-4 text-destructive" /></Button></div>)}
             </div>
-            <p className="mt-4 text-sm text-muted-foreground">Los permisos definitivos se aplican desde PostgreSQL mediante los roles Administrador y Caja.</p>
+            <p className="mt-4 text-sm text-muted-foreground">Las contraseñas se guardan cifradas. Al eliminar un usuario se conserva el historial de sus operaciones y se revoca su acceso.</p>
             <div className="mt-6 border-t border-border pt-5">
               <h3 className="mb-3 text-base font-semibold">Turnos de caja</h3>
               <div className="grid gap-2 sm:grid-cols-2">

@@ -8,7 +8,6 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from '@/components/ui/chart'
-import { salesByHour } from '@/lib/data'
 
 const chartConfig = {
   ventas: {
@@ -17,7 +16,7 @@ const chartConfig = {
   },
 } satisfies ChartConfig
 
-export function SalesChart() {
+export function SalesChart({ salesByHour }: { salesByHour: { hora: string; ventas: number }[] }) {
   return (
     <Card className="h-full">
       <CardHeader>

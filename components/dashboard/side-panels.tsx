@@ -8,23 +8,22 @@ import {
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import {
-  activity,
-  currency,
-  lowStockProducts,
-  recentSales,
-  type Activity,
-} from '@/lib/data'
+import { currency } from '@/lib/data'
+import type {
+  DashboardActivity,
+  DashboardProduct,
+  DashboardSale,
+} from '@/lib/dashboard-data'
 import { cn } from '@/lib/utils'
 
-const activityIcon: Record<Activity['tipo'], LucideIcon> = {
+const activityIcon: Record<DashboardActivity['tipo'], LucideIcon> = {
   venta: ShoppingCart,
   inventario: Boxes,
   membresia: IdCard,
   patrocinador: Handshake,
 }
 
-export function LowStockPanel() {
+export function LowStockPanel({ products }: { products: DashboardProduct[] }) {
   return (
     <Card className="h-full">
       <CardHeader>
@@ -34,7 +33,7 @@ export function LowStockPanel() {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-2">
-        {lowStockProducts.map((p) => (
+        {products.map((p) => (
           <div
             key={p.id}
             className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2.5"
@@ -53,12 +52,27 @@ export function LowStockPanel() {
             </div>
           </div>
         ))}
+        {products.length === 0 && (
+          <p className="py-6 text-center text-sm text-muted-foreground">
+            No hay productos por debajo del mínimo.
+          </p>
+        )}
       </CardContent>
     </Card>
   )
 }
 
-export function ActivityPanel() {
+function relativeTime(date: string) {
+  const minutes = Math.max(0, Math.floor((Date.now() - new Date(date).getTime()) / 60_000))
+  if (minutes < 1) return 'ahora'
+  if (minutes < 60) return `hace ${minutes} min`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `hace ${hours} h`
+  const days = Math.floor(hours / 24)
+  return `hace ${days} día${days === 1 ? '' : 's'}`
+}
+
+export function ActivityPanel({ activity }: { activity: DashboardActivity[] }) {
   return (
     <Card className="h-full">
       <CardHeader>
@@ -84,12 +98,17 @@ export function ActivityPanel() {
                 <div className="min-w-0 flex-1">
                   <p className="text-sm leading-snug">{a.descripcion}</p>
                   <p className="mt-0.5 text-xs text-muted-foreground">
-                    {a.usuario} · {a.hace}
+                    {a.usuario} · {relativeTime(a.fecha)}
                   </p>
                 </div>
               </li>
             )
           })}
+          {activity.length === 0 && (
+            <li className="py-6 text-center text-sm text-muted-foreground">
+              No hay actividad reciente.
+            </li>
+          )}
         </ol>
       </CardContent>
     </Card>
@@ -102,7 +121,7 @@ const estatusTone: Record<string, string> = {
   Devuelta: 'bg-destructive/15 text-destructive border-transparent',
 }
 
-export function RecentSalesPanel() {
+export function RecentSalesPanel({ sales }: { sales: DashboardSale[] }) {
   return (
     <Card>
       <CardHeader>
@@ -122,11 +141,15 @@ export function RecentSalesPanel() {
               </tr>
             </thead>
             <tbody>
-              {recentSales.map((s) => (
+              {sales.map((s) => (
                 <tr key={s.id} className="border-b border-border/60 last:border-0">
                   <td className="px-6 py-3 font-medium">{s.folio}</td>
                   <td className="px-6 py-3 text-muted-foreground">
-                    {s.fecha.split(' ')[1]}
+                    {new Intl.DateTimeFormat('es-MX', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      timeZone: 'America/Mexico_City',
+                    }).format(new Date(s.fecha))}
                   </td>
                   <td className="px-6 py-3 text-muted-foreground">{s.usuario}</td>
                   <td className="px-6 py-3 text-muted-foreground">{s.metodoPago}</td>
@@ -138,6 +161,13 @@ export function RecentSalesPanel() {
                   </td>
                 </tr>
               ))}
+              {sales.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="px-6 py-8 text-center text-muted-foreground">
+                    Todavía no hay ventas registradas.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

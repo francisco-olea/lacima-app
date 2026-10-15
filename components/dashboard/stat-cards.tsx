@@ -6,7 +6,8 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { Card } from '@/components/ui/card'
-import { currency, dashboardStats } from '@/lib/data'
+import { currency } from '@/lib/data'
+import type { DashboardStats } from '@/lib/dashboard-data'
 import { cn } from '@/lib/utils'
 
 type Stat = {
@@ -24,7 +25,7 @@ const toneMap: Record<Stat['tone'], string> = {
   warn: 'bg-destructive/15 text-destructive',
 }
 
-export function StatCards() {
+export function StatCards({ stats: dashboardStats }: { stats: DashboardStats }) {
   const stats: Stat[] = [
     {
       label: 'Ventas del día',

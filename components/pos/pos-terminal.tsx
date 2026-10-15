@@ -16,7 +16,7 @@ import {
   CheckCircle2,
   Receipt,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -32,7 +32,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
-import { currency, products, type Product } from '@/lib/data'
+import { currency, type Product } from '@/lib/data'
 import { cn } from '@/lib/utils'
 
 type CartItem = {
@@ -81,6 +81,9 @@ const FOLIO_SEQUENCE_KEY = 'lc-folio-sequence-v2'
 const SETTINGS_KEY = 'lc-settings'
 
 export function PosTerminal() {
+  const [products, setProducts] = useState<Product[]>([])
+  const [productsLoading, setProductsLoading] = useState(true)
+  const [productsError, setProductsError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [categoria, setCategoria] = useState<Categoria>('Todos')
   const [cart, setCart] = useState<CartItem[]>([])
@@ -111,6 +114,40 @@ export function PosTerminal() {
   })
 
   const scanRef = useRef<HTMLInputElement>(null)
+  const productRequestRef = useRef<AbortController | null>(null)
+  const productsErrorNotifiedRef = useRef(false)
+
+  const refreshProducts = useCallback(async () => {
+    productRequestRef.current?.abort()
+    const controller = new AbortController()
+    productRequestRef.current = controller
+
+    try {
+      const response = await fetch('/api/products', {
+        cache: 'no-store',
+        signal: controller.signal,
+      })
+      if (!response.ok) {
+        const body = await response.json() as { error?: string }
+        throw new Error(body.error ?? 'No se pudo cargar el inventario')
+      }
+      const latestProducts = await response.json() as Product[]
+      setProducts(latestProducts)
+      setProductsError(null)
+      productsErrorNotifiedRef.current = false
+    } catch (error) {
+      if (controller.signal.aborted) return
+      const message = error instanceof Error ? error.message : 'No se pudo cargar el inventario'
+      setProductsError(message)
+      if (!productsErrorNotifiedRef.current) toast.error(message)
+      productsErrorNotifiedRef.current = true
+    } finally {
+      if (productRequestRef.current === controller) {
+        productRequestRef.current = null
+        setProductsLoading(false)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     const storedSequence = Number.parseInt(localStorage.getItem(FOLIO_SEQUENCE_KEY) ?? '', 10)
@@ -130,6 +167,26 @@ export function PosTerminal() {
     }
   }, [])
 
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void refreshProducts()
+    }
+
+    void refreshProducts()
+    const interval = window.setInterval(() => void refreshProducts(), 30_000)
+    window.addEventListener('focus', refreshWhenVisible)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+
+    return () => {
+      window.clearInterval(interval)
+      window.removeEventListener('focus', refreshWhenVisible)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+      const request = productRequestRef.current
+      productRequestRef.current = null
+      request?.abort()
+    }
+  }, [refreshProducts])
+
   const filtered = useMemo(() => {
     return products.filter((p) => {
       const matchCat = categoria === 'Todos' || p.categoria === categoria
@@ -138,10 +195,10 @@ export function PosTerminal() {
         p.codigo.includes(query)
       return p.activo && matchCat && matchQuery
     })
-  }, [query, categoria])
+  }, [query, categoria, products])
 
   function addProduct(p: Product) {
-    const isCourtRental = p.id === 'p11'
+    const isCourtRental = p.codigo === '7501011'
     const isWeekend = [0, 6].includes(new Date().getDay())
     setCart((prev) => {
       const found = prev.find((i) => i.key === p.id)
@@ -329,6 +386,7 @@ export function PosTerminal() {
       return
     }
 
+    void refreshProducts()
     setVentasTurno((prev) => [venta, ...prev])
     setTicketToPrint(ticket)
     const sales = JSON.parse(localStorage.getItem(SALES_STORAGE_KEY) ?? '[]') as VentaTurno[]
@@ -477,10 +535,22 @@ export function PosTerminal() {
           })}
           {filtered.length === 0 && (
             <div className="col-span-full rounded-xl border border-dashed border-border py-12 text-center text-sm text-muted-foreground">
-              No se encontraron productos.
+              {productsLoading
+                ? 'Cargando inventario…'
+                : productsError
+                  ? 'No se pudo cargar el inventario.'
+                  : 'No se encontraron productos.'}
             </div>
           )}
         </div>
+        {productsError && (
+          <div role="alert" className="flex items-center justify-between gap-3 text-sm text-destructive">
+            <span>{productsError}</span>
+            <Button variant="outline" size="sm" onClick={() => void refreshProducts()}>
+              Reintentar
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Panel derecho: Carrito / Tickets */}

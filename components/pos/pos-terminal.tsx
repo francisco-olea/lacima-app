@@ -63,9 +63,22 @@ type Categoria = (typeof categorias)[number]
 type MetodoPago = 'Efectivo' | 'Tarjeta' | 'Transferencia'
 type PanelTab = 'carrito' | 'tickets'
 type Pago = { id: string; metodo: MetodoPago; monto: number }
+type DetalleTicket = { nombre: string; cantidad: number; precio: number; importe: number }
+type TicketImprimible = {
+  folio: string
+  fecha: string
+  hora: string
+  subtotal: number
+  descuento: number
+  total: number
+  pagadores: number
+  items: DetalleTicket[]
+  pagos: Pago[]
+}
 
 const SALES_STORAGE_KEY = 'lc-sales'
 const FOLIO_SEQUENCE_KEY = 'lc-folio-sequence-v2'
+const SETTINGS_KEY = 'lc-settings'
 
 export function PosTerminal() {
   const [query, setQuery] = useState('')
@@ -86,6 +99,9 @@ export function PosTerminal() {
   const [splitEnabled, setSplitEnabled] = useState(false)
   const [printConfirmOpen, setPrintConfirmOpen] = useState(false)
   const [panelTab, setPanelTab] = useState<PanelTab>('carrito')
+  const [ticketToPrint, setTicketToPrint] = useState<TicketImprimible | null>(null)
+  const [ticketHeader, setTicketHeader] = useState('La Cima Padel Club')
+  const [ticketFooter, setTicketFooter] = useState('Gracias por tu visita')
 
   // Ventas acumuladas del turno actual
   const [ventasTurno, setVentasTurno] = useState<VentaTurno[]>([])
@@ -100,6 +116,17 @@ export function PosTerminal() {
     const storedSequence = Number.parseInt(localStorage.getItem(FOLIO_SEQUENCE_KEY) ?? '', 10)
     if (!Number.isFinite(storedSequence)) {
       localStorage.setItem(FOLIO_SEQUENCE_KEY, '0')
+    }
+
+    const storedSettings = localStorage.getItem(SETTINGS_KEY)
+    if (storedSettings) {
+      try {
+        const settings = JSON.parse(storedSettings) as { ticketHeader?: unknown; ticketFooter?: unknown }
+        if (typeof settings.ticketHeader === 'string') setTicketHeader(settings.ticketHeader)
+        if (typeof settings.ticketFooter === 'string') setTicketFooter(settings.ticketFooter)
+      } catch {
+        toast.error('No se pudo cargar la configuración del comprobante')
+      }
     }
   }, [])
 
@@ -245,6 +272,22 @@ export function PosTerminal() {
       pagadores: splitEnabled ? Math.max(2, Number(splitPeople) || 2) : 1,
       pagos: updatedPayments,
     }
+    const ticket: TicketImprimible = {
+      folio,
+      fecha: now.toLocaleDateString('es-MX'),
+      hora,
+      subtotal,
+      descuento: descuentoMonto,
+      total,
+      pagadores: venta.pagadores,
+      items: cart.map((item) => ({
+        nombre: item.nombre,
+        cantidad: item.cantidad,
+        precio: item.precio,
+        importe: lineTotal(item),
+      })),
+      pagos: updatedPayments,
+    }
 
     const response = await fetch('/api/sales', {
       method: 'POST',
@@ -287,6 +330,7 @@ export function PosTerminal() {
     }
 
     setVentasTurno((prev) => [venta, ...prev])
+    setTicketToPrint(ticket)
     const sales = JSON.parse(localStorage.getItem(SALES_STORAGE_KEY) ?? '[]') as VentaTurno[]
     localStorage.setItem(SALES_STORAGE_KEY, JSON.stringify([venta, ...sales]))
 
@@ -305,8 +349,13 @@ export function PosTerminal() {
   }
 
   function sendToPrint() {
+    if (!ticketToPrint) {
+      toast.error('No hay un comprobante disponible para imprimir')
+      return
+    }
     setPrintConfirmOpen(false)
-    toast.success('Comprobante enviado a imprimir')
+    window.print()
+    toast.success('Se abrió el diálogo de impresión')
   }
 
   function openCheckout() {
@@ -857,7 +906,7 @@ export function PosTerminal() {
           <DialogHeader>
             <DialogTitle>Enviar a imprimir comprobante</DialogTitle>
             <DialogDescription>
-              La cuenta fue liquidada correctamente. ¿Deseas enviar el comprobante a la impresora?
+              La cuenta fue liquidada correctamente. El comprobante está en formato térmico de 80 mm. Selecciona la Epson TM-T20IV en el diálogo de impresión.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-0">
@@ -871,6 +920,52 @@ export function PosTerminal() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <div className="receipt-print-root" aria-hidden="true">
+        {ticketToPrint && (
+          <article className="receipt-print">
+            <header className="receipt-center">
+              <h1>{ticketHeader}</h1>
+              <p>COMPROBANTE DE VENTA</p>
+            </header>
+            <div className="receipt-divider" />
+            <div className="receipt-row"><span>Folio</span><strong>{ticketToPrint.folio}</strong></div>
+            <div className="receipt-row"><span>Fecha</span><span>{ticketToPrint.fecha}</span></div>
+            <div className="receipt-row"><span>Hora</span><span>{ticketToPrint.hora}</span></div>
+            <div className="receipt-divider" />
+            <section className="receipt-items">
+              {ticketToPrint.items.map((item, index) => (
+                <div className="receipt-item" key={`${item.nombre}-${index}`}>
+                  <p>{item.nombre}</p>
+                  <div className="receipt-row">
+                    <span>{item.cantidad} x {currency(item.precio)}</span>
+                    <strong>{currency(item.importe)}</strong>
+                  </div>
+                </div>
+              ))}
+            </section>
+            <div className="receipt-divider" />
+            <div className="receipt-row"><span>Subtotal</span><span>{currency(ticketToPrint.subtotal)}</span></div>
+            {ticketToPrint.descuento > 0 && (
+              <div className="receipt-row"><span>Descuento</span><span>-{currency(ticketToPrint.descuento)}</span></div>
+            )}
+            <div className="receipt-row receipt-total"><strong>TOTAL</strong><strong>{currency(ticketToPrint.total)}</strong></div>
+            <div className="receipt-divider" />
+            <p className="receipt-label">PAGO{ticketToPrint.pagos.length > 1 ? 'S' : ''}</p>
+            {ticketToPrint.pagos.map((payment) => (
+              <div className="receipt-row" key={payment.id}>
+                <span>{payment.metodo}</span>
+                <span>{currency(payment.monto)}</span>
+              </div>
+            ))}
+            {ticketToPrint.pagadores > 1 && (
+              <div className="receipt-row"><span>Personas</span><span>{ticketToPrint.pagadores}</span></div>
+            )}
+            <div className="receipt-divider" />
+            <footer className="receipt-center">{ticketFooter}</footer>
+          </article>
+        )}
+      </div>
 
       {/* Diálogo producto sin código */}
       <Dialog open={manualOpen} onOpenChange={setManualOpen}>

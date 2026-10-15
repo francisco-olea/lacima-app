@@ -194,3 +194,93 @@
 .tickets-slide-in {
   animation: slide-in-right var(--duration, 250ms) cubic-bezier(0.22, 1, 0.36, 1) both;
 }
+
+.receipt-print-root {
+  display: none;
+}
+
+@media print {
+  @page {
+    margin: 0;
+  }
+
+  html,
+  body {
+    width: 80mm;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+  }
+
+  body * {
+    visibility: hidden !important;
+  }
+
+  .receipt-print-root,
+  .receipt-print-root * {
+    visibility: visible !important;
+  }
+
+  .receipt-print-root {
+    position: absolute;
+    top: 0;
+    left: 0;
+    display: block !important;
+    width: 80mm;
+    padding: 4mm;
+    color: #000 !important;
+    background: #fff !important;
+    font-family: Arial, sans-serif;
+    font-size: 10pt;
+  }
+
+  .receipt-print {
+    width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .receipt-print h1 {
+    margin: 0 0 2mm;
+    font-size: 14pt;
+    font-weight: 700;
+  }
+
+  .receipt-print p {
+    margin: 0;
+  }
+
+  .receipt-center {
+    text-align: center;
+  }
+
+  .receipt-divider {
+    margin: 3mm 0;
+    border-top: 1px dashed #000;
+  }
+
+  .receipt-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 3mm;
+    margin: 1.5mm 0;
+  }
+
+  .receipt-item {
+    margin: 2mm 0;
+  }
+
+  .receipt-item > p {
+    margin-bottom: 1mm;
+    font-weight: 600;
+  }
+
+  .receipt-total {
+    margin-top: 2mm;
+    font-size: 12pt;
+  }
+
+  .receipt-label {
+    margin-bottom: 1mm !important;
+    font-weight: 700;
+  }
+}

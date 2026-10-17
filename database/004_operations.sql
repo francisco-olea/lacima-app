@@ -98,7 +98,7 @@ WHERE u.email IN (
 ON CONFLICT (user_id, shift_id) DO UPDATE SET active = true;
 
 INSERT INTO app.products (sku, name, category_id, unit_price, stock, minimum_stock, track_stock, active)
-SELECT '7501016', 'Alquiler de pala de padel', c.id, 50.00, 999.000, 0.000, false, true
+SELECT '7501016', 'Alquiler de pala de padel', c.id, 50.00, 0.000, 0.000, false, true
 FROM app.product_categories c
 WHERE c.name = 'Servicios'
 ON CONFLICT (sku) DO UPDATE SET

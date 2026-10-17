@@ -6,6 +6,7 @@ export type Product = {
   codigo: string
   nombre: string
   categoria: 'Bebidas' | 'Snacks' | 'Equipo' | 'Ropa' | 'Servicios'
+  tipo: 'Inventario' | 'Renta' | 'Servicio'
   precio: number
   existencias: number
   inventarioMinimo: number
@@ -49,22 +50,22 @@ export const CLUB = {
 }
 
 export const products: Product[] = [
-  { id: 'p1', codigo: '7501001', nombre: 'Agua Mineral 600ml', categoria: 'Bebidas', precio: 25, existencias: 84, inventarioMinimo: 24, activo: true },
-  { id: 'p2', codigo: '7501002', nombre: 'Bebida Isotónica', categoria: 'Bebidas', precio: 38, existencias: 12, inventarioMinimo: 20, activo: true },
-  { id: 'p3', codigo: '7501003', nombre: 'Cerveza Artesanal', categoria: 'Bebidas', precio: 65, existencias: 40, inventarioMinimo: 12, activo: true },
-  { id: 'p4', codigo: '7501004', nombre: 'Barra Proteína', categoria: 'Snacks', precio: 45, existencias: 6, inventarioMinimo: 15, activo: true },
-  { id: 'p5', codigo: '7501005', nombre: 'Mix de Nueces', categoria: 'Snacks', precio: 55, existencias: 30, inventarioMinimo: 10, activo: true },
-  { id: 'p6', codigo: '7501006', nombre: 'Bote de Pelotas x3', categoria: 'Equipo', precio: 180, existencias: 22, inventarioMinimo: 8, activo: true },
-  { id: 'p7', codigo: '7501007', nombre: 'Grip Overgrip', categoria: 'Equipo', precio: 90, existencias: 4, inventarioMinimo: 10, activo: true },
-  { id: 'p8', codigo: '7501008', nombre: 'Pala La Cima Pro', categoria: 'Equipo', precio: 3200, existencias: 9, inventarioMinimo: 3, activo: true },
-  { id: 'p9', codigo: '7501009', nombre: 'Playera Oficial', categoria: 'Ropa', precio: 420, existencias: 18, inventarioMinimo: 6, activo: true },
-  { id: 'p10', codigo: '7501010', nombre: 'Gorra La Cima', categoria: 'Ropa', precio: 280, existencias: 25, inventarioMinimo: 8, activo: true },
-  { id: 'p11', codigo: '7501011', nombre: 'Renta de cancha · 1 hora', categoria: 'Servicios', precio: 500, existencias: 999, inventarioMinimo: 0, activo: true },
-  { id: 'p12', codigo: '7501012', nombre: 'Clase particular · precio pendiente', categoria: 'Servicios', precio: 0, existencias: 999, inventarioMinimo: 0, activo: false },
-  { id: 'p16', codigo: '7501016', nombre: 'Alquiler de pala de pádel', categoria: 'Servicios', precio: 50, existencias: 999, inventarioMinimo: 0, activo: true },
-  { id: 'p13', codigo: '7501013', nombre: 'Toalla Deportiva', categoria: 'Ropa', precio: 160, existencias: 14, inventarioMinimo: 6, activo: true },
-  { id: 'p14', codigo: '7501014', nombre: 'Café Americano', categoria: 'Bebidas', precio: 35, existencias: 60, inventarioMinimo: 20, activo: true },
-  { id: 'p15', codigo: '7501015', nombre: 'Sandwich Club', categoria: 'Snacks', precio: 95, existencias: 8, inventarioMinimo: 10, activo: true },
+  { id: 'p1', codigo: '7501001', nombre: 'Agua Mineral 600ml', categoria: 'Bebidas', tipo: 'Inventario', precio: 25, existencias: 84, inventarioMinimo: 24, activo: true },
+  { id: 'p2', codigo: '7501002', nombre: 'Bebida Isotónica', categoria: 'Bebidas', tipo: 'Inventario', precio: 38, existencias: 12, inventarioMinimo: 20, activo: true },
+  { id: 'p3', codigo: '7501003', nombre: 'Cerveza Artesanal', categoria: 'Bebidas', tipo: 'Inventario', precio: 65, existencias: 40, inventarioMinimo: 12, activo: true },
+  { id: 'p4', codigo: '7501004', nombre: 'Barra Proteína', categoria: 'Snacks', tipo: 'Inventario', precio: 45, existencias: 6, inventarioMinimo: 15, activo: true },
+  { id: 'p5', codigo: '7501005', nombre: 'Mix de Nueces', categoria: 'Snacks', tipo: 'Inventario', precio: 55, existencias: 30, inventarioMinimo: 10, activo: true },
+  { id: 'p6', codigo: '7501006', nombre: 'Bote de Pelotas x3', categoria: 'Equipo', tipo: 'Inventario', precio: 180, existencias: 22, inventarioMinimo: 8, activo: true },
+  { id: 'p7', codigo: '7501007', nombre: 'Grip Overgrip', categoria: 'Equipo', tipo: 'Inventario', precio: 90, existencias: 4, inventarioMinimo: 10, activo: true },
+  { id: 'p8', codigo: '7501008', nombre: 'Pala La Cima Pro', categoria: 'Equipo', tipo: 'Inventario', precio: 3200, existencias: 9, inventarioMinimo: 3, activo: true },
+  { id: 'p9', codigo: '7501009', nombre: 'Playera Oficial', categoria: 'Ropa', tipo: 'Inventario', precio: 420, existencias: 18, inventarioMinimo: 6, activo: true },
+  { id: 'p10', codigo: '7501010', nombre: 'Gorra La Cima', categoria: 'Ropa', tipo: 'Inventario', precio: 280, existencias: 25, inventarioMinimo: 8, activo: true },
+  { id: 'p11', codigo: '7501011', nombre: 'Renta de cancha · 1 hora', categoria: 'Servicios', tipo: 'Renta', precio: 500, existencias: 0, inventarioMinimo: 0, activo: true },
+  { id: 'p12', codigo: '7501012', nombre: 'Clase particular · precio pendiente', categoria: 'Servicios', tipo: 'Servicio', precio: 0, existencias: 0, inventarioMinimo: 0, activo: false },
+  { id: 'p16', codigo: '7501016', nombre: 'Alquiler de pala de pádel', categoria: 'Servicios', tipo: 'Renta', precio: 50, existencias: 0, inventarioMinimo: 0, activo: true },
+  { id: 'p13', codigo: '7501013', nombre: 'Toalla Deportiva', categoria: 'Ropa', tipo: 'Inventario', precio: 160, existencias: 14, inventarioMinimo: 6, activo: true },
+  { id: 'p14', codigo: '7501014', nombre: 'Café Americano', categoria: 'Bebidas', tipo: 'Inventario', precio: 35, existencias: 60, inventarioMinimo: 20, activo: true },
+  { id: 'p15', codigo: '7501015', nombre: 'Sandwich Club', categoria: 'Snacks', tipo: 'Inventario', precio: 95, existencias: 8, inventarioMinimo: 10, activo: true },
 ]
 
 export const recentSales: Sale[] = [

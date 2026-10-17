@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS app.products (
   stock numeric(12,3) NOT NULL DEFAULT 0 CHECK (stock >= 0),
   minimum_stock numeric(12,3) NOT NULL DEFAULT 0 CHECK (minimum_stock >= 0),
   track_stock boolean NOT NULL DEFAULT true,
+  is_rental boolean NOT NULL DEFAULT false,
   active boolean NOT NULL DEFAULT true,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
@@ -329,8 +330,8 @@ FROM (VALUES
   ('7501008', 'Pala La Cima Pro', 'Equipo', 3200.00, 9.000, 3.000, true),
   ('7501009', 'Playera Oficial', 'Ropa', 420.00, 18.000, 6.000, true),
   ('7501010', 'Gorra La Cima', 'Ropa', 280.00, 25.000, 8.000, true),
-  ('7501011', 'Renta de Cancha 90 min', 'Servicios', 600.00, 999.000, 0.000, false),
-  ('7501012', 'Clase Particular', 'Servicios', 500.00, 999.000, 0.000, false),
+  ('7501011', 'Renta de Cancha 90 min', 'Servicios', 600.00, 0.000, 0.000, false),
+  ('7501012', 'Clase Particular', 'Servicios', 500.00, 0.000, 0.000, false),
   ('7501013', 'Toalla Deportiva', 'Ropa', 160.00, 14.000, 6.000, true),
   ('7501014', 'Cafe Americano', 'Bebidas', 35.00, 60.000, 20.000, true),
   ('7501015', 'Sandwich Club', 'Snacks', 95.00, 8.000, 10.000, true)

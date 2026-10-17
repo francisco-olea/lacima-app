@@ -9,6 +9,8 @@
 `006_catalog_updates.sql` actualiza los tiers a Embajador/Socio y deja Mensual como único plan activo.
 `007_admin_and_passwords.sql` asigna a Fernanda como Administrador y crea la función segura para cambiar contraseñas con hash bcrypt.
 `008_cashier_pos_only.sql` limita el rol Caja al punto de venta y sus turnos.
+`009_user_management_sessions.sql` agrega sesiones de usuario y sus índices.
+`010_rental_products.sql` identifica las rentas y elimina existencias ficticias de productos que no controlan inventario.
 
 ## Aplicar la migracion
 
@@ -29,6 +31,8 @@ psql -U postgres -d lacima -f database/005_usernames_and_folios.sql
 psql -U postgres -d lacima -f database/006_catalog_updates.sql
 psql -U postgres -d lacima -f database/007_admin_and_passwords.sql
 psql -U postgres -d lacima -f database/008_cashier_pos_only.sql
+psql -U postgres -d lacima -f database/009_user_management_sessions.sql
+psql -U postgres -d lacima -f database/010_rental_products.sql
 ```
 
 La migracion es repetible y no borra datos existentes. Requiere permiso para crear la extension `pgcrypto`.

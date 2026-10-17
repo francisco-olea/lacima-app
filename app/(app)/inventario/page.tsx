@@ -33,8 +33,8 @@ export default function InventarioPage() {
   const [editOpen, setEditOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
-  const [editProduct, setEditProduct] = useState({ nombre: '', codigo: '', categoria: 'Bebidas' as Product['categoria'], precio: '', existencias: '0', inventarioMinimo: '0' })
-  const [newProduct, setNewProduct] = useState({ nombre: '', codigo: '', categoria: 'Bebidas' as Product['categoria'], precio: '', existencias: '0', inventarioMinimo: '0' })
+  const [editProduct, setEditProduct] = useState({ nombre: '', codigo: '', categoria: 'Bebidas' as Product['categoria'], tipo: 'Inventario' as Product['tipo'], precio: '', existencias: '0', inventarioMinimo: '0' })
+  const [newProduct, setNewProduct] = useState({ nombre: '', codigo: '', categoria: 'Bebidas' as Product['categoria'], tipo: 'Inventario' as Product['tipo'], precio: '', existencias: '0', inventarioMinimo: '0' })
 
   useEffect(() => {
     let mounted = true
@@ -69,7 +69,7 @@ export default function InventarioPage() {
   )
 
   const lowStockCount = items.filter(
-    (producto) => producto.inventarioMinimo > 0 && producto.existencias <= producto.inventarioMinimo,
+    (producto) => producto.tipo === 'Inventario' && producto.inventarioMinimo > 0 && producto.existencias <= producto.inventarioMinimo,
   ).length
 
   async function persistStock(producto: Product, next: number) {
@@ -83,7 +83,7 @@ export default function InventarioPage() {
 
   function updateStock(id: string, next: number) {
     const producto = items.find((item) => item.id === id)
-    if (!producto || Number.isNaN(next)) return
+    if (!producto || producto.tipo === 'Renta' || Number.isNaN(next)) return
     const safeNext = Math.max(0, next)
     setItems((prev) => prev.map((item) => item.id === id ? { ...item, existencias: safeNext } : item))
     void persistStock(producto, safeNext).catch((error: unknown) => {
@@ -107,7 +107,15 @@ export default function InventarioPage() {
       const response = await fetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ codigo: newProduct.codigo.trim(), nombre: newProduct.nombre.trim(), categoria: newProduct.categoria, precio: price, existencias: Math.max(0, stock || 0), inventarioMinimo: Math.max(0, minimum || 0) }),
+        body: JSON.stringify({
+          codigo: newProduct.codigo.trim(),
+          nombre: newProduct.nombre.trim(),
+          categoria: newProduct.categoria,
+          tipo: newProduct.tipo,
+          precio: price,
+          existencias: newProduct.tipo === 'Inventario' ? Math.max(0, stock || 0) : 0,
+          inventarioMinimo: newProduct.tipo === 'Inventario' ? Math.max(0, minimum || 0) : 0,
+        }),
       })
       if (!response.ok) {
         toast.error(await responseError(response, 'No se pudo guardar el producto'))
@@ -115,7 +123,7 @@ export default function InventarioPage() {
       }
       const savedProduct = await response.json() as Product
       setItems((current) => [savedProduct, ...current])
-      setNewProduct({ nombre: '', codigo: '', categoria: 'Bebidas', precio: '', existencias: '0', inventarioMinimo: '0' })
+      setNewProduct({ nombre: '', codigo: '', categoria: 'Bebidas', tipo: 'Inventario', precio: '', existencias: '0', inventarioMinimo: '0' })
       setAddOpen(false)
     } catch {
       toast.error('No se pudo conectar con el servidor para guardar el producto')
@@ -124,7 +132,7 @@ export default function InventarioPage() {
 
   function openEdit(producto: Product) {
     setSelectedProduct(producto)
-    setEditProduct({ nombre: producto.nombre, codigo: producto.codigo, categoria: producto.categoria, precio: String(producto.precio), existencias: String(producto.existencias), inventarioMinimo: String(producto.inventarioMinimo) })
+    setEditProduct({ nombre: producto.nombre, codigo: producto.codigo, categoria: producto.categoria, tipo: producto.tipo, precio: String(producto.precio), existencias: String(producto.existencias), inventarioMinimo: String(producto.inventarioMinimo) })
     setEditOpen(true)
   }
 
@@ -147,9 +155,10 @@ export default function InventarioPage() {
         nuevoCodigo: editProduct.codigo.trim(),
         nombre: editProduct.nombre.trim(),
         categoria: editProduct.categoria,
+        tipo: editProduct.tipo,
         precio: price,
-        existencias: stock,
-        inventarioMinimo: minimum,
+        existencias: editProduct.tipo === 'Inventario' ? stock : 0,
+        inventarioMinimo: editProduct.tipo === 'Inventario' ? minimum : 0,
       }),
     })
     if (!response.ok) {
@@ -188,16 +197,30 @@ export default function InventarioPage() {
         <div>
           <p className="text-2xl font-semibold tracking-tight">Inventario</p>
           <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-            Lista de productos con existencias, alertas de stock bajo y ajustes rápidos. Modifica las cantidades directamente desde aquí.
+            Administra artículos con existencias, rentas y servicios. Las rentas y servicios no se descuentan ni generan alertas de inventario.
           </p>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-4">
           <Card className="rounded-3xl border border-border bg-card p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-              Productos
+              Productos en inventario
             </p>
-            <p className="mt-3 text-3xl font-semibold">{items.length}</p>
-            <p className="mt-1 text-sm text-muted-foreground">Total de artículos disponibles</p>
+            <p className="mt-3 text-3xl font-semibold">{items.filter((producto) => producto.tipo === 'Inventario').length}</p>
+            <p className="mt-1 text-sm text-muted-foreground">Artículos con existencias controladas</p>
+          </Card>
+          <Card className="rounded-3xl border border-border bg-card p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+              Rentas
+            </p>
+            <p className="mt-3 text-3xl font-semibold">{items.filter((producto) => producto.tipo === 'Renta').length}</p>
+            <p className="mt-1 text-sm text-muted-foreground">Productos clasificados para renta</p>
+          </Card>
+          <Card className="rounded-3xl border border-border bg-card p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+              Otros servicios
+            </p>
+            <p className="mt-3 text-3xl font-semibold">{items.filter((producto) => producto.tipo === 'Servicio').length}</p>
+            <p className="mt-1 text-sm text-muted-foreground">No cuentan como existencias físicas</p>
           </Card>
           <Card className="rounded-3xl border border-border bg-card p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
@@ -254,6 +277,7 @@ export default function InventarioPage() {
               <tr>
                 <th className="px-4 py-3">Producto</th>
                 <th className="px-4 py-3">Categoría</th>
+                <th className="px-4 py-3">Tipo</th>
                 <th className="px-4 py-3">Existencias</th>
                 <th className="px-4 py-3">Precio</th>
                 <th className="px-4 py-3">Estado</th>
@@ -262,7 +286,7 @@ export default function InventarioPage() {
             </thead>
             <tbody className="divide-y divide-border bg-card">
               {filtered.map((producto) => {
-                const bajo = producto.inventarioMinimo > 0 && producto.existencias <= producto.inventarioMinimo
+                const bajo = producto.tipo === 'Inventario' && producto.inventarioMinimo > 0 && producto.existencias <= producto.inventarioMinimo
                 return (
                   <tr key={producto.id} className="hover:bg-muted/40">
                     <td className="px-4 py-4 align-top">
@@ -273,37 +297,44 @@ export default function InventarioPage() {
                       <Badge>{producto.categoria}</Badge>
                     </td>
                     <td className="px-4 py-4 align-top">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          type="button"
-                          onClick={() => changeStock(producto.id, -1)}
-                          aria-label={`Reducir existencias de ${producto.nombre}`}
-                        >
-                          <Minus className="size-4" />
-                        </Button>
-                        <Input
-                          type="number"
-                          min={0}
-                          value={producto.existencias}
-                          onChange={(event) =>
-                            updateStock(producto.id, Number(event.target.value))
-                          }
-                          className="h-10 w-24 text-center"
-                          aria-label={`Existencias de ${producto.nombre}`}
-                        />
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          type="button"
-                          onClick={() => changeStock(producto.id, 1)}
-                          aria-label={`Aumentar existencias de ${producto.nombre}`}
-                        >
-                          <Plus className="size-4" />
-                        </Button>
-                      </div>
-                      <p className="mt-2 text-xs text-muted-foreground">Mín {producto.inventarioMinimo}</p>
+                      <Badge variant={producto.tipo === 'Renta' ? 'secondary' : 'outline'}>{producto.tipo}</Badge>
+                    </td>
+                    <td className="px-4 py-4 align-top">
+                      {producto.tipo !== 'Inventario' ? (
+                        <span className="text-muted-foreground">No se controla</span>
+                      ) : (
+                        <>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              type="button"
+                              onClick={() => changeStock(producto.id, -1)}
+                              aria-label={`Reducir existencias de ${producto.nombre}`}
+                            >
+                              <Minus className="size-4" />
+                            </Button>
+                            <Input
+                              type="number"
+                              min={0}
+                              value={producto.existencias}
+                              onChange={(event) => updateStock(producto.id, Number(event.target.value))}
+                              className="h-10 w-24 text-center"
+                              aria-label={`Existencias de ${producto.nombre}`}
+                            />
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              type="button"
+                              onClick={() => changeStock(producto.id, 1)}
+                              aria-label={`Aumentar existencias de ${producto.nombre}`}
+                            >
+                              <Plus className="size-4" />
+                            </Button>
+                          </div>
+                          <p className="mt-2 text-xs text-muted-foreground">Mín {producto.inventarioMinimo}</p>
+                        </>
+                      )}
                       {bajo && (
                         <p className="mt-1 text-xs font-semibold text-destructive">
                           Inventario bajo
@@ -333,7 +364,7 @@ export default function InventarioPage() {
               })}
               {filtered.length === 0 && (
                 <tr>
-                  <td className="px-4 py-16 text-center text-sm text-muted-foreground" colSpan={6}>
+                  <td className="px-4 py-16 text-center text-sm text-muted-foreground" colSpan={7}>
                     No se encontraron productos para los criterios seleccionados.
                   </td>
                 </tr>
@@ -345,11 +376,16 @@ export default function InventarioPage() {
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Agregar producto</DialogTitle><DialogDescription>Registra un producto nuevo para el catálogo e inventario.</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>Agregar producto</DialogTitle><DialogDescription>Registra un producto, artículo de inventario o servicio de renta.</DialogDescription></DialogHeader>
           <form onSubmit={addProduct} className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="new-name">Nombre</Label><Input id="new-name" required value={newProduct.nombre} onChange={(e) => setNewProduct({ ...newProduct, nombre: e.target.value })} /></div><div className="space-y-2"><Label htmlFor="new-code">Código</Label><Input id="new-code" required value={newProduct.codigo} onChange={(e) => setNewProduct({ ...newProduct, codigo: e.target.value })} /></div></div>
             <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="new-category">Categoría</Label><select id="new-category" value={newProduct.categoria} onChange={(e) => setNewProduct({ ...newProduct, categoria: e.target.value as Product['categoria'] })} className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm">{categorias.filter((category) => category !== 'Todos').map((category) => <option key={category}>{category}</option>)}</select></div><div className="space-y-2"><Label htmlFor="new-price">Precio</Label><Input id="new-price" required type="number" min="0" step="0.01" value={newProduct.precio} onChange={(e) => setNewProduct({ ...newProduct, precio: e.target.value })} /></div></div>
-            <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="new-stock">Existencias</Label><Input id="new-stock" type="number" min="0" value={newProduct.existencias} onChange={(e) => setNewProduct({ ...newProduct, existencias: e.target.value })} /></div><div className="space-y-2"><Label htmlFor="new-minimum">Mínimo de inventario</Label><Input id="new-minimum" type="number" min="0" value={newProduct.inventarioMinimo} onChange={(e) => setNewProduct({ ...newProduct, inventarioMinimo: e.target.value })} /></div></div>
+            <div className="space-y-2"><Label htmlFor="new-type">Tipo</Label><select id="new-type" value={newProduct.tipo} onChange={(e) => setNewProduct({ ...newProduct, tipo: e.target.value as Product['tipo'] })} className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"><option>Inventario</option><option>Renta</option><option>Servicio</option></select></div>
+            {newProduct.tipo === 'Inventario' ? (
+              <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="new-stock">Existencias</Label><Input id="new-stock" type="number" min="0" value={newProduct.existencias} onChange={(e) => setNewProduct({ ...newProduct, existencias: e.target.value })} /></div><div className="space-y-2"><Label htmlFor="new-minimum">Mínimo de inventario</Label><Input id="new-minimum" type="number" min="0" value={newProduct.inventarioMinimo} onChange={(e) => setNewProduct({ ...newProduct, inventarioMinimo: e.target.value })} /></div></div>
+            ) : (
+              <p className="text-sm text-muted-foreground">Las rentas y servicios no llevan existencias ni se descuentan al venderse.</p>
+            )}
             <DialogFooter><Button type="button" variant="outline" onClick={() => setAddOpen(false)}><X className="size-4" /> Cancelar</Button><Button type="submit"><Save className="size-4" /> Guardar producto</Button></DialogFooter>
           </form>
         </DialogContent>
@@ -370,10 +406,15 @@ export default function InventarioPage() {
               <div className="space-y-2"><Label htmlFor="edit-category">Categoría</Label><select id="edit-category" value={editProduct.categoria} onChange={(e) => setEditProduct({ ...editProduct, categoria: e.target.value as Product['categoria'] })} className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm">{categorias.filter((category) => category !== 'Todos').map((category) => <option key={category}>{category}</option>)}</select></div>
               <div className="space-y-2"><Label htmlFor="edit-price">Precio</Label><Input id="edit-price" required type="number" min="0" step="0.01" value={editProduct.precio} onChange={(e) => setEditProduct({ ...editProduct, precio: e.target.value })} /></div>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-2"><Label htmlFor="edit-stock">Existencias</Label><Input id="edit-stock" required type="number" min="0" value={editProduct.existencias} onChange={(e) => setEditProduct({ ...editProduct, existencias: e.target.value })} /></div>
-              <div className="space-y-2"><Label htmlFor="edit-minimum">Mínimo de inventario</Label><Input id="edit-minimum" required type="number" min="0" value={editProduct.inventarioMinimo} onChange={(e) => setEditProduct({ ...editProduct, inventarioMinimo: e.target.value })} /></div>
-            </div>
+            <div className="space-y-2"><Label htmlFor="edit-type">Tipo</Label><select id="edit-type" value={editProduct.tipo} onChange={(e) => setEditProduct({ ...editProduct, tipo: e.target.value as Product['tipo'] })} className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"><option>Inventario</option><option>Renta</option><option>Servicio</option></select></div>
+            {editProduct.tipo === 'Inventario' ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-2"><Label htmlFor="edit-stock">Existencias</Label><Input id="edit-stock" required type="number" min="0" value={editProduct.existencias} onChange={(e) => setEditProduct({ ...editProduct, existencias: e.target.value })} /></div>
+                <div className="space-y-2"><Label htmlFor="edit-minimum">Mínimo de inventario</Label><Input id="edit-minimum" required type="number" min="0" value={editProduct.inventarioMinimo} onChange={(e) => setEditProduct({ ...editProduct, inventarioMinimo: e.target.value })} /></div>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">Las rentas y servicios no llevan existencias ni se descuentan al venderse.</p>
+            )}
             <DialogFooter><Button type="button" variant="outline" onClick={() => setEditOpen(false)}><X className="size-4" /> Cancelar</Button><Button type="submit"><Save className="size-4" /> Confirmar cambios</Button></DialogFooter>
           </form>
         </DialogContent>

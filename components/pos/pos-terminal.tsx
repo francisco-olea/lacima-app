@@ -429,13 +429,13 @@ export function PosTerminal() {
   // Totales del turno por método de pago
   const totalTurno = ventasTurno.reduce((a, v) => a + v.total, 0)
   const porMetodo = ventasTurno.reduce(
-    (acc, v) => {
-      if (v.metodo !== 'Mixto') {
-        acc[v.metodo] = (acc[v.metodo] ?? 0) + v.total
+    (acc, venta) => {
+      for (const pago of venta.pagos) {
+        acc[pago.metodo] += pago.monto
       }
       return acc
     },
-    {} as Record<MetodoPago, number>,
+    { Efectivo: 0, Tarjeta: 0, Transferencia: 0 },
   )
 
   return (
@@ -748,21 +748,17 @@ export function PosTerminal() {
               </div>
 
               {/* Resumen métodos */}
-              {ventasTurno.length > 0 && (
-                <div className="mt-3 flex gap-2">
-                  {(['Efectivo', 'Tarjeta', 'Transferencia'] as MetodoPago[]).map((m) =>
-                    porMetodo[m] ? (
-                      <div
-                        key={m}
-                        className="flex-1 rounded-lg border border-border bg-muted/30 px-2 py-1.5 text-center"
-                      >
-                        <p className="text-[10px] text-muted-foreground">{m}</p>
-                        <p className="text-xs font-semibold">{currency(porMetodo[m])}</p>
-                      </div>
-                    ) : null,
-                  )}
-                </div>
-              )}
+              <div className="mt-3 flex gap-2">
+                {(['Efectivo', 'Tarjeta', 'Transferencia'] as MetodoPago[]).map((m) => (
+                  <div
+                    key={m}
+                    className="flex-1 rounded-lg border border-border bg-muted/30 px-2 py-1.5 text-center"
+                  >
+                    <p className="text-[10px] text-muted-foreground">{m}</p>
+                    <p className="text-xs font-semibold">{currency(porMetodo[m])}</p>
+                  </div>
+                ))}
+              </div>
             </div>
 
             {/* Lista de tickets */}
@@ -1116,14 +1112,12 @@ export function PosTerminal() {
                     Resumen del turno
                   </p>
                   <div className="space-y-2 text-sm">
-                    {(['Efectivo', 'Tarjeta', 'Transferencia'] as MetodoPago[]).map((m) =>
-                      porMetodo[m] !== undefined ? (
-                        <div key={m} className="flex items-center justify-between">
-                          <span className="text-muted-foreground">{m}</span>
-                          <span className="font-medium">{currency(porMetodo[m])}</span>
-                        </div>
-                      ) : null,
-                    )}
+                    {(['Efectivo', 'Tarjeta', 'Transferencia'] as MetodoPago[]).map((m) => (
+                      <div key={m} className="flex items-center justify-between">
+                        <span className="text-muted-foreground">{m}</span>
+                        <span className="font-medium">{currency(porMetodo[m])}</span>
+                      </div>
+                    ))}
                     <Separator className="my-1" />
                     <div className="flex items-center justify-between text-base font-semibold">
                       <span>Total del turno</span>

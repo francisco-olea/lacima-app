@@ -8,6 +8,7 @@ type ProductRow = {
   codigo: string
   nombre: string
   categoria: string
+  tipo: string
   precio: string
   existencias: string
   inventarioMinimo: string
@@ -20,6 +21,7 @@ function toProduct(row: ProductRow) {
     codigo: row.codigo,
     nombre: row.nombre,
     categoria: row.categoria,
+    tipo: row.tipo === 'Inventario' || row.tipo === 'Servicio' ? row.tipo : 'Renta',
     precio: Number(row.precio),
     existencias: Number(row.existencias),
     inventarioMinimo: Number(row.inventarioMinimo),
@@ -31,8 +33,15 @@ export async function GET() {
   try {
     const result = await db.query<ProductRow>(`
       SELECT p.id, p.sku AS codigo, p.name AS nombre, c.name AS categoria,
-             p.unit_price AS precio, p.stock AS existencias,
-             p.minimum_stock AS "inventarioMinimo", p.active AS activo
+             CASE
+               WHEN p.is_rental THEN 'Renta'
+               WHEN p.track_stock THEN 'Inventario'
+               ELSE 'Servicio'
+             END AS tipo,
+             p.unit_price AS precio,
+             CASE WHEN p.track_stock THEN p.stock ELSE 0 END AS existencias,
+             CASE WHEN p.track_stock THEN p.minimum_stock ELSE 0 END AS "inventarioMinimo",
+             p.active AS activo
       FROM app.products p
       JOIN app.product_categories c ON c.id = p.category_id
       WHERE p.active = true
@@ -52,23 +61,43 @@ export async function POST(request: Request) {
     codigo?: string
     nombre?: string
     categoria?: string
+    tipo?: 'Inventario' | 'Renta' | 'Servicio'
     precio?: number
     existencias?: number
     inventarioMinimo?: number
   }
 
-  if (!body.codigo?.trim() || !body.nombre?.trim() || !body.categoria?.trim() || !Number.isFinite(body.precio) || body.precio! < 0) {
+  if (
+    !body.codigo?.trim()
+    || !body.nombre?.trim()
+    || !body.categoria?.trim()
+    || !Number.isFinite(body.precio)
+    || body.precio! < 0
+    || (body.tipo !== undefined && body.tipo !== 'Inventario' && body.tipo !== 'Renta' && body.tipo !== 'Servicio')
+    || (body.existencias !== undefined && (!Number.isFinite(body.existencias) || body.existencias < 0))
+    || (body.inventarioMinimo !== undefined && (!Number.isFinite(body.inventarioMinimo) || body.inventarioMinimo < 0))
+  ) {
     return NextResponse.json({ error: 'Datos de producto inválidos' }, { status: 400 })
   }
 
   try {
     const result = await db.query<ProductRow>(`
-      INSERT INTO app.products (sku, name, category_id, unit_price, stock, minimum_stock, active)
-      VALUES ($1, $2, (SELECT id FROM app.product_categories WHERE name = $3), $4, $5, $6, true)
+      INSERT INTO app.products (sku, name, category_id, unit_price, stock, minimum_stock, track_stock, is_rental, active)
+      VALUES ($1, $2, (SELECT id FROM app.product_categories WHERE name = $3), $4, $5, $6, $7, $8, true)
       RETURNING id, sku AS codigo, name AS nombre, $3::text AS categoria,
+                CASE WHEN is_rental THEN 'Renta' WHEN track_stock THEN 'Inventario' ELSE 'Servicio' END AS tipo,
                 unit_price AS precio, stock AS existencias,
                 minimum_stock AS "inventarioMinimo", active AS activo
-    `, [body.codigo.trim(), body.nombre.trim(), body.categoria.trim(), body.precio, Math.max(0, body.existencias ?? 0), Math.max(0, body.inventarioMinimo ?? 0)])
+    `, [
+      body.codigo.trim(),
+      body.nombre.trim(),
+      body.categoria.trim(),
+      body.precio,
+      body.tipo === 'Inventario' ? Math.max(0, body.existencias ?? 0) : 0,
+      body.tipo === 'Inventario' ? Math.max(0, body.inventarioMinimo ?? 0) : 0,
+      body.tipo === 'Inventario',
+      body.tipo === 'Renta',
+    ])
 
     return NextResponse.json(toProduct(result.rows[0]), { status: 201 })
   } catch (error) {
@@ -90,20 +119,27 @@ export async function PATCH(request: Request) {
     nombre?: string
     nuevoCodigo?: string
     categoria?: string
+    tipo?: 'Inventario' | 'Renta' | 'Servicio'
     precio?: number
     existencias?: number
     inventarioMinimo?: number
   }
-  const isEdit = body.nombre !== undefined || body.nuevoCodigo !== undefined || body.categoria !== undefined || body.precio !== undefined || body.inventarioMinimo !== undefined
-  if (!body.codigo?.trim() || !Number.isFinite(body.existencias) || body.existencias! < 0) {
+  const isEdit = body.nombre !== undefined || body.nuevoCodigo !== undefined || body.categoria !== undefined || body.tipo !== undefined || body.precio !== undefined || body.inventarioMinimo !== undefined
+  if (
+    !body.codigo?.trim()
+    || !Number.isFinite(body.existencias)
+    || body.existencias! < 0
+    || (body.tipo !== undefined && body.tipo !== 'Inventario' && body.tipo !== 'Renta' && body.tipo !== 'Servicio')
+    || (body.inventarioMinimo !== undefined && (!Number.isFinite(body.inventarioMinimo) || body.inventarioMinimo < 0))
+  ) {
     return NextResponse.json({ error: 'Existencias inválidas' }, { status: 400 })
   }
 
   const client = await db.connect()
   try {
     await client.query('BEGIN')
-    const product = await client.query<{ id: string; stock: string; sku: string }>(
-      'SELECT id, stock, sku FROM app.products WHERE sku = $1 FOR UPDATE',
+    const product = await client.query<{ id: string; stock: string; sku: string; track_stock: boolean; is_rental: boolean }>(
+      'SELECT id, stock, sku, track_stock, is_rental FROM app.products WHERE sku = $1 FOR UPDATE',
       [body.codigo.trim()],
     )
     if (product.rowCount === 0) {
@@ -111,8 +147,11 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: 'Producto no encontrado' }, { status: 404 })
     }
 
-    const currentStock = Number(product.rows[0].stock)
-    const nextStock = body.existencias!
+    const currentTrackStock = product.rows[0].track_stock
+    const currentStock = currentTrackStock ? Number(product.rows[0].stock) : 0
+    const nextTrackStock = body.tipo === undefined ? currentTrackStock : body.tipo === 'Inventario'
+    const nextIsRental = body.tipo === undefined ? product.rows[0].is_rental : body.tipo === 'Renta'
+    const nextStock = nextTrackStock ? body.existencias! : 0
     const updated = await client.query<ProductRow>(`
       UPDATE app.products p
       SET sku = COALESCE($1, p.sku),
@@ -120,11 +159,14 @@ export async function PATCH(request: Request) {
           category_id = COALESCE((SELECT id FROM app.product_categories WHERE name = $7), p.category_id),
           unit_price = COALESCE($3, p.unit_price),
           stock = $4,
-          minimum_stock = COALESCE($5, p.minimum_stock),
+          minimum_stock = CASE WHEN $8 THEN COALESCE($5, p.minimum_stock) ELSE 0 END,
+          track_stock = $8,
+          is_rental = $9,
           updated_at = now()
         WHERE p.id = $6 AND ($7::text IS NULL OR EXISTS (SELECT 1 FROM app.product_categories WHERE name = $7))
         RETURNING p.id, p.sku AS codigo, p.name AS nombre,
             (SELECT name FROM app.product_categories WHERE id = p.category_id) AS categoria,
+                CASE WHEN p.is_rental THEN 'Renta' WHEN p.track_stock THEN 'Inventario' ELSE 'Servicio' END AS tipo,
                 p.unit_price AS precio, p.stock AS existencias,
                 p.minimum_stock AS "inventarioMinimo", p.active AS activo
     `, [
@@ -135,11 +177,13 @@ export async function PATCH(request: Request) {
       isEdit ? body.inventarioMinimo : null,
       product.rows[0].id,
       isEdit ? body.categoria?.trim() || null : null,
+      nextTrackStock,
+      nextIsRental,
     ])
     if (updated.rowCount === 0) {
       throw new Error('La categoría no existe')
     }
-    if (nextStock !== currentStock) {
+    if ((currentTrackStock || nextTrackStock) && nextStock !== currentStock) {
       await client.query(`
         INSERT INTO app.inventory_movements
           (product_id, movement_type, quantity, stock_before, stock_after, notes)

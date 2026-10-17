@@ -10,3 +10,4 @@
 \ir 007_admin_and_passwords.sql
 \ir 008_cashier_pos_only.sql
 \ir 009_user_management_sessions.sql
+\ir 010_rental_products.sql

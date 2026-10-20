@@ -11,3 +11,6 @@
 \ir 008_cashier_pos_only.sql
 \ir 009_user_management_sessions.sql
 \ir 010_rental_products.sql
+\ir 011_francisco_admin.sql
+\ir 012_deactivate_demo_sponsors.sql
+\ir 013_open_accounts.sql

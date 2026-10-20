@@ -7,6 +7,7 @@ import {
   BarChart3,
   Boxes,
   ChevronUp,
+  ClipboardList,
   Handshake,
   IdCard,
   LayoutDashboard,
@@ -44,6 +45,7 @@ const PRIMARY_NAV = [
 
 const MORE_NAV = [
   { label: 'Dashboard', href: '/', icon: LayoutDashboard, ready: true },
+  { label: 'Cortes', href: '/cortes', icon: ClipboardList, ready: true },
   { label: 'Patrocinadores', href: '/patrocinadores', icon: Handshake, ready: true },
   { label: 'Reportes', href: '/reportes', icon: BarChart3, ready: true },
   { label: 'Configuración', href: '/configuracion', icon: Settings, ready: true },

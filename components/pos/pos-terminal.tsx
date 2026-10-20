@@ -15,6 +15,7 @@ import {
   ClipboardList,
   CheckCircle2,
   Receipt,
+  UserRound,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
@@ -61,8 +62,25 @@ type VentaTurno = {
 const categorias = ['Todos', 'Bebidas', 'Snacks', 'Equipo', 'Ropa', 'Servicios'] as const
 type Categoria = (typeof categorias)[number]
 type MetodoPago = 'Efectivo' | 'Tarjeta' | 'Transferencia'
-type PanelTab = 'carrito' | 'tickets'
+type PanelTab = 'carrito' | 'cuentas' | 'tickets'
 type Pago = { id: string; metodo: MetodoPago; monto: number }
+type OpenAccountItem = {
+  id: string
+  productId: string | null
+  sku: string | null
+  description: string
+  quantity: number
+  unitPrice: number
+  discountAmount: number
+  lineTotal: number
+}
+type OpenAccount = {
+  id: string
+  customerName: string
+  createdAt: string
+  total: number
+  items: OpenAccountItem[]
+}
 type DetalleTicket = { nombre: string; cantidad: number; precio: number; importe: number }
 type TicketImprimible = {
   folio: string
@@ -75,10 +93,91 @@ type TicketImprimible = {
   items: DetalleTicket[]
   pagos: Pago[]
 }
+type CashSessionResponse = {
+  id: string
+  register: string
+  openedAt: string
+  openingAmount: number
+  total: number
+  totals: { cash: number; card: number; transfer: number }
+  sales: {
+    id: string
+    folio: string
+    soldAt: string
+    total: number
+    items: number
+    payments: { method: 'cash' | 'card' | 'transfer'; amount: number }[]
+  }[]
+}
+type CutResponse = CashSessionResponse & {
+  closedAt: string
+  closingCash: number
+  expectedCash: number
+  difference: number
+}
+
+type PosDraft = {
+  cart: CartItem[]
+  descuento: number
+  metodo: MetodoPago
+  recibido: string
+  paymentAmount: string
+  payments: Pago[]
+  splitPeople: string
+  splitEnabled: boolean
+}
+
+function isOutOfStock(product: Product) {
+  return product.tipo === 'Inventario' && product.existencias <= 0
+}
+
+function isCartItem(value: unknown): value is CartItem {
+  if (!value || typeof value !== 'object') return false
+  const item = value as Partial<CartItem>
+  return typeof item.key === 'string'
+    && typeof item.nombre === 'string'
+    && typeof item.precio === 'number'
+    && Number.isFinite(item.precio)
+    && item.precio >= 0
+    && typeof item.cantidad === 'number'
+    && Number.isFinite(item.cantidad)
+    && item.cantidad > 0
+    && typeof item.addedAt === 'number'
+    && Number.isFinite(item.addedAt)
+}
+
+function isPago(value: unknown): value is Pago {
+  if (!value || typeof value !== 'object') return false
+  const payment = value as Partial<Pago>
+  return typeof payment.id === 'string'
+    && (payment.metodo === 'Efectivo' || payment.metodo === 'Tarjeta' || payment.metodo === 'Transferencia')
+    && typeof payment.monto === 'number'
+    && Number.isFinite(payment.monto)
+    && payment.monto > 0
+}
+
+function isPosDraft(value: unknown): value is PosDraft {
+  if (!value || typeof value !== 'object') return false
+  const draft = value as Partial<PosDraft>
+  return Array.isArray(draft.cart)
+    && draft.cart.every(isCartItem)
+    && typeof draft.descuento === 'number'
+    && Number.isFinite(draft.descuento)
+    && draft.descuento >= 0
+    && draft.descuento <= 100
+    && (draft.metodo === 'Efectivo' || draft.metodo === 'Tarjeta' || draft.metodo === 'Transferencia')
+    && typeof draft.recibido === 'string'
+    && typeof draft.paymentAmount === 'string'
+    && Array.isArray(draft.payments)
+    && draft.payments.every(isPago)
+    && typeof draft.splitPeople === 'string'
+    && typeof draft.splitEnabled === 'boolean'
+}
 
 const SALES_STORAGE_KEY = 'lc-sales'
 const FOLIO_SEQUENCE_KEY = 'lc-folio-sequence-v2'
 const SETTINGS_KEY = 'lc-settings'
+const POS_DRAFT_KEY = 'lc-pos-draft-v1'
 
 export function PosTerminal() {
   const [products, setProducts] = useState<Product[]>([])
@@ -93,9 +192,18 @@ export function PosTerminal() {
   const [paymentAmount, setPaymentAmount] = useState('')
   const [payments, setPayments] = useState<Pago[]>([])
   const [checkoutOpen, setCheckoutOpen] = useState(false)
+  const [checkoutAccount, setCheckoutAccount] = useState<OpenAccount | null>(null)
+  const [openAccounts, setOpenAccounts] = useState<OpenAccount[]>([])
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null)
+  const [accountDialogOpen, setAccountDialogOpen] = useState(false)
+  const [customerName, setCustomerName] = useState('')
+  const [accountSaving, setAccountSaving] = useState(false)
   const [manualOpen, setManualOpen] = useState(false)
   const [corteOpen, setCorteOpen] = useState(false)
   const [corteConfirmado, setCorteConfirmado] = useState(false)
+  const [corteSaving, setCorteSaving] = useState(false)
+  const [cashCount, setCashCount] = useState('')
+  const [cutResult, setCutResult] = useState<CutResponse | null>(null)
   const [manualName, setManualName] = useState('')
   const [manualPrice, setManualPrice] = useState('')
   const [splitPeople, setSplitPeople] = useState('1')
@@ -108,14 +216,124 @@ export function PosTerminal() {
 
   // Ventas acumuladas del turno actual
   const [ventasTurno, setVentasTurno] = useState<VentaTurno[]>([])
-  const [turnoInicio] = useState(() => {
-    const now = new Date()
-    return now.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
-  })
+  const [turnoInicio, setTurnoInicio] = useState('--:--')
+  const [cashSession, setCashSession] = useState<CashSessionResponse | null>(null)
+  const [cashSessionReady, setCashSessionReady] = useState(false)
+  const [cashSessionWarning, setCashSessionWarning] = useState<string | null>(null)
+  const [currentUsername, setCurrentUsername] = useState('Usuario')
+  const [draftLoaded, setDraftLoaded] = useState(false)
 
   const scanRef = useRef<HTMLInputElement>(null)
   const productRequestRef = useRef<AbortController | null>(null)
   const productsErrorNotifiedRef = useRef(false)
+
+  const loadOpenAccounts = useCallback(async () => {
+    const response = await fetch('/api/open-accounts', { cache: 'no-store' })
+    if (!response.ok) {
+      const result = await response.json() as { error?: string }
+      throw new Error(result.error ?? 'No se pudieron cargar las cuentas abiertas')
+    }
+    const accounts = await response.json() as OpenAccount[]
+    setOpenAccounts(accounts)
+    setSelectedAccountId((current) => current && accounts.some((account) => account.id === current)
+      ? current
+      : null)
+    return accounts
+  }, [])
+
+  useEffect(() => {
+    try {
+      const storedDraft = sessionStorage.getItem(POS_DRAFT_KEY)
+      if (storedDraft) {
+        const parsed: unknown = JSON.parse(storedDraft)
+        if (!isPosDraft(parsed)) throw new Error('Los datos de la venta pendiente no son válidos')
+        setCart(parsed.cart)
+        setDescuento(parsed.descuento)
+        setMetodo(parsed.metodo)
+        setRecibido(parsed.recibido)
+        setPaymentAmount(parsed.paymentAmount)
+        setPayments(parsed.payments)
+        setSplitPeople(parsed.splitPeople)
+        setSplitEnabled(parsed.splitEnabled)
+      }
+    } catch (error) {
+      try {
+        sessionStorage.removeItem(POS_DRAFT_KEY)
+      } catch (removeError) {
+        console.error('No se pudo limpiar el borrador de venta inválido', removeError)
+      }
+      toast.error('No se pudo restaurar la venta pendiente; inicia una nueva venta')
+      console.error('No se pudo restaurar la venta pendiente', error)
+    } finally {
+      setDraftLoaded(true)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!draftLoaded) return
+    const draft: PosDraft = {
+      cart,
+      descuento,
+      metodo,
+      recibido,
+      paymentAmount,
+      payments,
+      splitPeople,
+      splitEnabled,
+    }
+    try {
+      sessionStorage.setItem(POS_DRAFT_KEY, JSON.stringify(draft))
+    } catch (error) {
+      console.error('No se pudo guardar la venta pendiente', error)
+      toast.error('No se pudo guardar la venta pendiente en esta sesión del navegador')
+    }
+  }, [cart, descuento, draftLoaded, metodo, paymentAmount, payments, recibido, splitEnabled, splitPeople])
+
+  const openCashSession = useCallback(async () => {
+    setCashSessionWarning(null)
+    const response = await fetch('/api/cash-sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'open' }),
+    })
+    if (!response.ok) {
+      const result = await response.json() as { error?: string }
+      if (response.status === 409 && result.error?.startsWith('La caja sigue abierta por otro usuario')) {
+        setCashSessionWarning(result.error)
+        return null
+      }
+      throw new Error(result.error ?? 'No se pudo abrir el turno de caja')
+    }
+    const session = await response.json() as CashSessionResponse
+    setCashSession(session)
+    setTurnoInicio(new Date(session.openedAt).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }))
+    setVentasTurno(session.sales.map((sale) => {
+      const payments: Pago[] = sale.payments.map((payment, index) => ({
+        id: `${sale.id}-${index}`,
+        metodo: payment.method === 'cash' ? 'Efectivo' : payment.method === 'card' ? 'Tarjeta' : 'Transferencia',
+        monto: payment.amount,
+      }))
+      return {
+        id: sale.id,
+        folio: sale.folio,
+        hora: new Date(sale.soldAt).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }),
+        fecha: sale.soldAt,
+        total: sale.total,
+        metodo: payments.length === 1 ? payments[0].metodo : 'Mixto',
+        items: sale.items,
+        pagadores: 1,
+        pagos: payments,
+      }
+    }))
+    setCashCount((session.openingAmount + session.totals.cash).toFixed(2))
+    setCashSessionReady(true)
+    try {
+      await loadOpenAccounts()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudieron cargar las cuentas abiertas')
+    }
+    return session
+  }, [loadOpenAccounts])
 
   const refreshProducts = useCallback(async () => {
     productRequestRef.current?.abort()
@@ -187,6 +405,26 @@ export function PosTerminal() {
     }
   }, [refreshProducts])
 
+  useEffect(() => {
+    void openCashSession().catch((error: unknown) => {
+      toast.error(error instanceof Error ? error.message : 'No se pudo abrir el turno de caja')
+    })
+  }, [openCashSession])
+
+  useEffect(() => {
+    let active = true
+    fetch('/api/auth/session', { cache: 'no-store' })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('No se pudo consultar el usuario actual')
+        const user = await response.json() as { username?: string }
+        if (active && user.username) setCurrentUsername(user.username)
+      })
+      .catch((error: unknown) => {
+        console.error('No se pudo consultar el usuario actual', error)
+      })
+    return () => { active = false }
+  }, [])
+
   const filtered = useMemo(() => {
     return products.filter((p) => {
       const matchCat = categoria === 'Todos' || p.categoria === categoria
@@ -198,6 +436,13 @@ export function PosTerminal() {
   }, [query, categoria, products])
 
   function addProduct(p: Product) {
+    const currentQuantity = cart.find((item) => item.key === p.id)?.cantidad ?? 0
+    if (p.tipo === 'Inventario' && currentQuantity >= p.existencias) {
+      toast.error(isOutOfStock(p)
+        ? 'Este producto no tiene existencias disponibles'
+        : 'No hay más existencias disponibles para agregar')
+      return false
+    }
     const isCourtRental = p.codigo === '7501011'
     const isWeekend = [0, 6].includes(new Date().getDay())
     setCart((prev) => {
@@ -211,22 +456,120 @@ export function PosTerminal() {
     })
     // Switch to carrito tab when adding a product
     setPanelTab('carrito')
+    return true
   }
 
-  function handleScan(e: React.FormEvent) {
+  async function addProductToAccount(product: Product) {
+    if (!selectedAccountId) {
+      toast.error('Selecciona una cuenta abierta antes de agregar productos')
+      setPanelTab('cuentas')
+      return
+    }
+    setAccountSaving(true)
+    try {
+      const response = await fetch('/api/open-accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'add-item',
+          accountId: selectedAccountId,
+          productId: product.id,
+        }),
+      })
+      if (!response.ok) {
+        const result = await response.json() as { error?: string }
+        throw new Error(result.error ?? 'No se pudo agregar el artículo a la cuenta')
+      }
+      const updated = await response.json() as OpenAccount
+      setOpenAccounts((current) => current.map((account) => account.id === updated.id ? updated : account))
+      toast.success(`${product.nombre} agregado a ${updated.customerName}`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo agregar el artículo a la cuenta')
+    } finally {
+      setAccountSaving(false)
+    }
+  }
+
+  async function selectProduct(product: Product) {
+    if (panelTab === 'cuentas' && selectedAccountId) {
+      await addProductToAccount(product)
+      return
+    }
+    addProduct(product)
+  }
+
+  async function handleScan(e: React.FormEvent) {
     e.preventDefault()
     const code = query.trim()
     if (!code) return
     const match = products.find((p) => p.codigo === code)
     if (match) {
-      addProduct(match)
-      toast.success(`Agregado: ${match.nombre}`)
+      if (panelTab === 'cuentas' && selectedAccountId) {
+        await addProductToAccount(match)
+      } else if (addProduct(match)) {
+        toast.success(`Agregado: ${match.nombre}`)
+      }
       setQuery('')
     } else if (filtered.length === 1) {
-      addProduct(filtered[0])
+      await selectProduct(filtered[0])
       setQuery('')
     } else {
       toast.error('Código no encontrado')
+    }
+  }
+
+  async function createOpenAccount(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const name = customerName.trim()
+    if (!name) {
+      toast.error('Ingresa el nombre del cliente')
+      return
+    }
+    setAccountSaving(true)
+    try {
+      const response = await fetch('/api/open-accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'create', customerName: name }),
+      })
+      if (!response.ok) {
+        const result = await response.json() as { error?: string }
+        throw new Error(result.error ?? 'No se pudo abrir la cuenta')
+      }
+      const account = await response.json() as OpenAccount
+      setOpenAccounts((current) => [...current, account])
+      setSelectedAccountId(account.id)
+      setPanelTab('cuentas')
+      setCustomerName('')
+      setAccountDialogOpen(false)
+      toast.success(`Cuenta abierta para ${account.customerName}`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo abrir la cuenta')
+    } finally {
+      setAccountSaving(false)
+    }
+  }
+
+  async function cancelOpenAccount(account: OpenAccount) {
+    if (!window.confirm(`¿Cancelar la cuenta de ${account.customerName}?`)) return
+    setAccountSaving(true)
+    try {
+      const response = await fetch('/api/open-accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'cancel', accountId: account.id }),
+      })
+      if (!response.ok) {
+        const result = await response.json() as { error?: string }
+        throw new Error(result.error ?? 'No se pudo cancelar la cuenta')
+      }
+      setOpenAccounts((await response.json()) as OpenAccount[])
+      setSelectedAccountId(null)
+      toast.success(`Cuenta de ${account.customerName} cancelada`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo cancelar la cuenta')
+    } finally {
+      setAccountSaving(false)
     }
   }
 
@@ -272,8 +615,15 @@ export function PosTerminal() {
   const subtotal = cart.reduce((a, i) => a + lineTotal(i), 0)
   const descuentoMonto = Math.min(subtotal, (subtotal * descuento) / 100)
   const total = subtotal - descuentoMonto
+  const checkoutSubtotal = checkoutAccount
+    ? checkoutAccount.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0)
+    : subtotal
+  const checkoutDiscount = checkoutAccount
+    ? checkoutAccount.items.reduce((sum, item) => sum + item.discountAmount, 0)
+    : descuentoMonto
+  const checkoutTotal = checkoutAccount?.total ?? total
   const paidAmount = payments.reduce((sum, payment) => sum + payment.monto, 0)
-  const remainingAmount = Math.max(0, total - paidAmount)
+  const remainingAmount = Math.max(0, checkoutTotal - paidAmount)
   const suggestedPayment = remainingAmount / Math.max(1, Number(splitPeople) - payments.length)
   const paymentValue = Number.parseFloat(paymentAmount) || 0
   const cambio = Math.max(0, (Number.parseFloat(recibido) || 0) - paymentValue)
@@ -289,6 +639,92 @@ export function PosTerminal() {
     toast('Venta cancelada')
   }
 
+  async function chargeOpenAccount(accountPayments: Pago[]) {
+    if (!checkoutAccount) return
+    const amount = accountPayments.reduce((sum, payment) => sum + payment.monto, 0)
+    if (Math.abs(amount - checkoutAccount.total) > 0.01) {
+      toast.error('Para cerrar la cuenta, el pago debe cubrir el total completo')
+      return
+    }
+    const sequence = (Number.parseInt(localStorage.getItem(FOLIO_SEQUENCE_KEY) ?? '0', 10) || 0) + 1
+    const folio = `V-${String(sequence).padStart(6, '0')}`
+    const response = await fetch('/api/open-accounts', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'charge',
+        accountId: checkoutAccount.id,
+        folio,
+        payersCount: splitEnabled ? Math.max(2, Number(splitPeople) || 2) : accountPayments.length,
+        payments: accountPayments.map((payment) => ({
+          method: payment.metodo === 'Efectivo' ? 'cash' : payment.metodo === 'Tarjeta' ? 'card' : 'transfer',
+          amount: payment.monto,
+        })),
+      }),
+    })
+    if (!response.ok) {
+      const result = await response.json() as { error?: string }
+      throw new Error(result.error ?? 'No se pudo cobrar la cuenta abierta')
+    }
+    const sale = await response.json() as {
+      id: string
+      folio: string
+      subtotal: number
+      discountAmount: number
+      total: number
+      items: { description: string; quantity: number; unitPrice: number; lineTotal: number }[]
+    }
+    localStorage.setItem(FOLIO_SEQUENCE_KEY, String(sequence))
+    const now = new Date()
+    const hora = now.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
+    const fecha = now.toISOString()
+    const itemsCount = sale.items.reduce((sum, item) => sum + item.quantity, 0)
+    const completedSale: VentaTurno = {
+      id: sale.id,
+      folio: sale.folio,
+      hora,
+      fecha,
+      total: sale.total,
+      metodo: accountPayments.length > 1 ? 'Mixto' : accountPayments[0].metodo,
+      items: itemsCount,
+      pagadores: splitEnabled ? Math.max(2, Number(splitPeople) || 2) : accountPayments.length,
+      pagos: accountPayments,
+    }
+    const ticket: TicketImprimible = {
+      folio: sale.folio,
+      fecha: now.toLocaleDateString('es-MX'),
+      hora,
+      subtotal: sale.subtotal,
+      descuento: sale.discountAmount,
+      total: sale.total,
+      pagadores: splitEnabled ? Math.max(2, Number(splitPeople) || 2) : accountPayments.length,
+      items: sale.items.map((item) => ({
+        nombre: item.description,
+        cantidad: item.quantity,
+        precio: item.unitPrice,
+        importe: item.lineTotal,
+      })),
+      pagos: accountPayments,
+    }
+
+    setVentasTurno((current) => [completedSale, ...current])
+    setOpenAccounts((current) => current.filter((account) => account.id !== checkoutAccount.id))
+    setSelectedAccountId(null)
+    setTicketToPrint(ticket)
+    const storedSales = JSON.parse(localStorage.getItem(SALES_STORAGE_KEY) ?? '[]') as VentaTurno[]
+    localStorage.setItem(SALES_STORAGE_KEY, JSON.stringify([completedSale, ...storedSales]))
+    setCheckoutOpen(false)
+    setCheckoutAccount(null)
+    setPrintConfirmOpen(true)
+    setPayments([])
+    setRecibido('')
+    setPaymentAmount('')
+    toast.success(`Cuenta de ${checkoutAccount.customerName} cobrada`, {
+      description: `${itemsCount} artículos · ${currency(sale.total)}`,
+    })
+    void refreshProducts()
+  }
+
   async function confirmSale() {
     const amount = paymentValue || remainingAmount
     if (amount <= 0 || amount > remainingAmount + 0.01) {
@@ -302,8 +738,28 @@ export function PosTerminal() {
     const payment: Pago = { id: `${Date.now()}-${payments.length}`, metodo, monto: amount }
     const updatedPayments = [...payments, payment]
     const updatedPaidAmount = updatedPayments.reduce((sum, item) => sum + item.monto, 0)
+    const updatedRemaining = Math.max(0, checkoutTotal - updatedPaidAmount)
+
+    if (checkoutAccount) {
+      if (updatedRemaining > 0.01) {
+        setPayments(updatedPayments)
+        setPaymentAmount((updatedRemaining / Math.max(1, Number(splitPeople) - updatedPayments.length)).toFixed(2))
+        setRecibido('')
+        toast.success('Pago registrado', { description: `Saldo pendiente: ${currency(updatedRemaining)}` })
+        return
+      }
+      setAccountSaving(true)
+      try {
+        await chargeOpenAccount(updatedPayments)
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'No se pudo cobrar la cuenta abierta')
+      } finally {
+        setAccountSaving(false)
+      }
+      return
+    }
+
     setPayments(updatedPayments)
-    const updatedRemaining = Math.max(0, total - updatedPaidAmount)
     if (updatedRemaining > 0.01) {
       setPaymentAmount(updatedRemaining.toFixed(2))
       setRecibido('')
@@ -417,13 +873,61 @@ export function PosTerminal() {
   }
 
   function openCheckout() {
+    setCheckoutAccount(null)
+    setPayments([])
+    setMetodo('Efectivo')
+    setRecibido('')
     setPaymentAmount(suggestedPayment.toFixed(2))
     setCheckoutOpen(true)
   }
 
-  function hacerCorte() {
-    setCorteConfirmado(true)
-    toast.success('Corte de caja generado y enviado al administrador')
+  function openAccountCheckout(account: OpenAccount) {
+    if (account.items.length === 0) {
+      toast.error('Agrega artículos antes de cobrar esta cuenta')
+      return
+    }
+    setCheckoutAccount(account)
+    setPayments([])
+    setMetodo('Efectivo')
+    setRecibido('')
+    setPaymentAmount(account.total.toFixed(2))
+    setCheckoutOpen(true)
+  }
+
+  function abrirCorte() {
+    setCutResult(null)
+    setCashCount(((cashSession?.openingAmount ?? 0) + porMetodo.Efectivo).toFixed(2))
+    setCorteConfirmado(false)
+    setCorteOpen(true)
+  }
+
+  async function hacerCorte() {
+    const closingCash = Number(cashCount)
+    if (!cashCount.trim() || !Number.isFinite(closingCash) || closingCash < 0) {
+      toast.error('Ingresa una cantidad válida de efectivo contado')
+      return
+    }
+    setCorteSaving(true)
+    try {
+      const response = await fetch('/api/cash-sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'close', closingCash }),
+      })
+      if (!response.ok) {
+        const result = await response.json() as { error?: string }
+        throw new Error(result.error ?? 'No se pudo realizar el corte')
+      }
+      const result = await response.json() as CutResponse
+      setCutResult(result)
+      setCashSessionReady(false)
+      setCorteConfirmado(true)
+      toast.success('Corte de caja guardado')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo realizar el corte')
+    } finally {
+      setCorteSaving(false)
+    }
   }
 
   // Totales del turno por método de pago
@@ -440,6 +944,14 @@ export function PosTerminal() {
 
   return (
     <div className="mx-auto grid max-w-7xl grid-cols-1 gap-4 lg:grid-cols-[1fr_380px]">
+      {cashSessionWarning && (
+        <div
+          role="status"
+          className="col-span-full rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200"
+        >
+          {cashSessionWarning}
+        </div>
+      )}
       {/* Catálogo */}
       <div className="space-y-4">
         {/* Barra: búsqueda + botón corte de caja */}
@@ -476,7 +988,7 @@ export function PosTerminal() {
             variant="outline"
             size="lg"
             className="h-12 gap-2 border-border text-muted-foreground hover:text-foreground"
-            onClick={() => { setCorteConfirmado(false); setCorteOpen(true) }}
+            onClick={abrirCorte}
           >
             <ClipboardList className="size-4.5" />
             <span className="hidden sm:inline">Corte de caja</span>
@@ -512,11 +1024,19 @@ export function PosTerminal() {
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
           {filtered.map((p) => {
             const bajo = p.inventarioMinimo > 0 && p.existencias <= p.inventarioMinimo
+            const sinExistencias = isOutOfStock(p)
             return (
               <button
                 key={p.id}
-                onClick={() => addProduct(p)}
-                className="group flex flex-col rounded-xl border border-border bg-card p-4 text-left transition-all hover:border-primary/60 hover:shadow-sm active:scale-[0.98]"
+                onClick={() => void selectProduct(p)}
+                disabled={sinExistencias || accountSaving}
+                title={sinExistencias ? 'Sin existencias disponibles' : undefined}
+                className={cn(
+                  'group flex flex-col rounded-xl border border-border bg-card p-4 text-left transition-all',
+                  sinExistencias
+                    ? 'cursor-not-allowed grayscale opacity-50'
+                    : 'hover:border-primary/60 hover:shadow-sm active:scale-[0.98]',
+                )}
               >
                 <div className="flex items-start justify-between gap-2">
                   <span className="text-xs text-muted-foreground">{p.categoria}</span>
@@ -530,6 +1050,9 @@ export function PosTerminal() {
                 <p className="mt-auto pt-3 text-lg font-semibold text-primary">
                   {currency(p.precio)}
                 </p>
+                {sinExistencias && (
+                  <span className="mt-1 text-xs font-medium text-muted-foreground">Sin existencias</span>
+                )}
               </button>
             )
           })}
@@ -575,6 +1098,23 @@ export function PosTerminal() {
             )}
           </button>
           <button
+            onClick={() => setPanelTab('cuentas')}
+            className={cn(
+              'flex flex-1 items-center justify-center gap-1 py-3 text-sm font-medium transition-colors',
+              panelTab === 'cuentas'
+                ? 'border-b-2 border-primary text-foreground'
+                : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            <UserRound className="size-4" />
+            Cuentas
+            {openAccounts.length > 0 && (
+              <Badge variant="secondary" className="h-5 min-w-5 justify-center rounded-full px-1.5 text-[10px]">
+                {openAccounts.length}
+              </Badge>
+            )}
+          </button>
+          <button
             onClick={() => setPanelTab('tickets')}
             className={cn(
               'flex flex-1 items-center justify-center gap-2 py-3 text-sm font-medium transition-colors',
@@ -597,7 +1137,7 @@ export function PosTerminal() {
         {panelTab === 'carrito' && (
           <>
             <div className="flex items-center justify-between px-4 py-2.5">
-              <span className="text-xs text-muted-foreground">{ventasTurno.length} venta{ventasTurno.length !== 1 ? 's' : ''} en turno</span>
+              <span className="text-xs text-muted-foreground">En turno: {currentUsername}</span>
               {cart.length > 0 && (
                 <Button
                   variant="ghost"
@@ -711,7 +1251,7 @@ export function PosTerminal() {
               <Button
                 size="lg"
                 className="mt-3 h-12 w-full gap-2 text-base"
-                disabled={cart.length === 0}
+                disabled={cart.length === 0 || !cashSessionReady}
                 onClick={openCheckout}
               >
                 <Banknote className="size-5" />
@@ -719,6 +1259,103 @@ export function PosTerminal() {
               </Button>
             </div>
           </>
+        )}
+
+        {/* ---- CUENTAS ABIERTAS ---- */}
+        {panelTab === 'cuentas' && (
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
+              <div>
+                <p className="text-sm font-semibold">Cuentas abiertas</p>
+                <p className="text-xs text-muted-foreground">Selecciona una cuenta y agrega productos del catálogo.</p>
+              </div>
+              <Button
+                size="sm"
+                className="shrink-0 gap-1.5"
+                onClick={() => setAccountDialogOpen(true)}
+                disabled={!cashSessionReady || accountSaving}
+              >
+                <Plus className="size-4" />
+                Nueva
+              </Button>
+            </div>
+            {selectedAccountId && (
+              <div className="border-b border-primary/30 bg-primary/5 px-4 py-2 text-xs text-primary">
+                Toca un producto del catálogo para agregarlo a{' '}
+                <strong>{openAccounts.find((account) => account.id === selectedAccountId)?.customerName}</strong>.
+              </div>
+            )}
+            <div className="flex-1 space-y-3 overflow-y-auto p-3">
+              {openAccounts.length === 0 ? (
+                <div className="flex h-full flex-col items-center justify-center text-center text-sm text-muted-foreground">
+                  <UserRound className="mb-3 size-10 opacity-30" />
+                  Aún no hay cuentas abiertas en este turno.
+                </div>
+              ) : openAccounts.map((account) => {
+                const selected = account.id === selectedAccountId
+                return (
+                  <div
+                    key={account.id}
+                    className={cn(
+                      'rounded-xl border p-3 transition-colors',
+                      selected ? 'border-primary bg-primary/5' : 'border-border bg-background',
+                    )}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setSelectedAccountId(selected ? null : account.id)}
+                      className="flex w-full items-start justify-between gap-3 text-left"
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-semibold">{account.customerName}</span>
+                        <span className="mt-0.5 block text-xs text-muted-foreground">
+                          {account.items.reduce((sum, item) => sum + item.quantity, 0)} artículo(s) · Abierta{' '}
+                          {new Date(account.createdAt).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </span>
+                      <span className="shrink-0 text-sm font-semibold text-primary">{currency(account.total)}</span>
+                    </button>
+                    {selected && (
+                      <>
+                        {account.items.length > 0 ? (
+                          <ul className="mt-3 space-y-1.5 border-t border-border pt-2">
+                            {account.items.map((item) => (
+                              <li key={item.id} className="flex justify-between gap-2 text-xs">
+                                <span className="min-w-0 truncate text-muted-foreground">
+                                  {item.quantity} × {item.description}
+                                </span>
+                                <span className="shrink-0">{currency(item.lineTotal)}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="mt-3 border-t border-border pt-2 text-xs text-muted-foreground">
+                            Esta cuenta no tiene artículos. Agrega productos desde el catálogo.
+                          </p>
+                        )}
+                        <Button
+                          className="mt-3 w-full gap-2"
+                          onClick={() => openAccountCheckout(account)}
+                          disabled={!cashSessionReady || account.items.length === 0 || accountSaving}
+                        >
+                          <Banknote className="size-4" />
+                          Cobrar cuenta · {currency(account.total)}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          className="mt-2 w-full text-destructive hover:text-destructive"
+                          onClick={() => void cancelOpenAccount(account)}
+                          disabled={accountSaving}
+                        >
+                          Cancelar cuenta
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
         )}
 
         {/* ---- TICKETS ---- */}
@@ -740,7 +1377,7 @@ export function PosTerminal() {
                   size="sm"
                   variant="outline"
                   className="h-8 gap-1.5 text-xs"
-                  onClick={() => { setCorteConfirmado(false); setCorteOpen(true) }}
+                  onClick={abrirCorte}
                 >
                   <ClipboardList className="size-3.5" />
                   Corte
@@ -801,19 +1438,64 @@ export function PosTerminal() {
         )}
       </Card>
 
+      <Dialog open={accountDialogOpen} onOpenChange={setAccountDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Abrir cuenta</DialogTitle>
+            <DialogDescription>Solo necesitas el nombre del cliente. Podrás agregar artículos y cobrar después.</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={createOpenAccount} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="open-account-customer">Nombre del cliente</Label>
+              <Input
+                id="open-account-customer"
+                autoFocus
+                maxLength={160}
+                value={customerName}
+                onChange={(event) => setCustomerName(event.target.value)}
+                placeholder="Nombre"
+              />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setAccountDialogOpen(false)}>
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={!customerName.trim() || accountSaving}>
+                {accountSaving ? 'Abriendo…' : 'Abrir cuenta'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
       {/* Diálogo de cobro */}
       <Dialog open={checkoutOpen} onOpenChange={setCheckoutOpen}>
-        <DialogContent className="sm:max-w-2xl">
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Cobro</DialogTitle>
             <DialogDescription className="rounded-xl border border-primary/30 bg-primary/10 px-4 py-3">
               <span className="block text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Total a cobrar</span>
-              <span className="mt-1 block text-4xl font-bold tracking-tight text-primary sm:text-5xl">{currency(total)}</span>
+              <span className="mt-1 block text-4xl font-bold tracking-tight text-primary sm:text-5xl">{currency(checkoutTotal)}</span>
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
+            {checkoutAccount && (
+              <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm">
+                Cuenta de <strong>{checkoutAccount.customerName}</strong>
+              </div>
+            )}
             <div className="rounded-xl border border-border bg-muted/40 p-4">
+              <div className="flex items-center justify-between text-sm text-muted-foreground">
+                <span>Subtotal</span>
+                <span>{currency(checkoutSubtotal)}</span>
+              </div>
+              {checkoutDiscount > 0 && (
+                <div className="mt-1 flex items-center justify-between text-sm text-accent">
+                  <span>Descuento</span>
+                  <span>-{currency(checkoutDiscount)}</span>
+                </div>
+              )}
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">Pagado</span>
                 <span className="font-semibold text-accent">{currency(paidAmount)}</span>
@@ -948,7 +1630,7 @@ export function PosTerminal() {
                   />
                   <div className="flex justify-between rounded-lg bg-accent/10 px-3 py-2 text-sm">
                     <span className="text-muted-foreground">A pagar por persona</span>
-                    <span className="font-semibold text-accent">{currency(total / Math.max(2, Number(splitPeople) || 2))}</span>
+                    <span className="font-semibold text-accent">{currency(checkoutTotal / Math.max(2, Number(splitPeople) || 2))}</span>
                   </div>
                 </div>
               )}
@@ -959,7 +1641,7 @@ export function PosTerminal() {
             <Button variant="outline" onClick={() => setCheckoutOpen(false)}>
               Volver
             </Button>
-            <Button onClick={confirmSale} className="gap-2">
+            <Button onClick={confirmSale} className="gap-2" disabled={accountSaving}>
               <Printer className="size-4" />
               {remainingAmount > 0.01 ? 'Registrar pago' : 'Confirmar e imprimir'}
             </Button>
@@ -1089,16 +1771,27 @@ export function PosTerminal() {
           {corteConfirmado ? (
             <div className="flex flex-col items-center gap-3 py-6 text-center">
               <CheckCircle2 className="size-12 text-primary" />
-              <p className="text-base font-semibold">Corte enviado al administrador</p>
+              <p className="text-base font-semibold">Corte realizado correctamente</p>
               <p className="text-sm text-muted-foreground">
-                El resumen del turno ha sido registrado y estará disponible en Reportes.
+                El corte quedó guardado en Cortes con el detalle de sus ventas.
               </p>
+              {cutResult && (
+                <div className="w-full space-y-1 rounded-xl border border-border bg-muted/40 p-4 text-sm">
+                  <div className="flex justify-between"><span className="text-muted-foreground">Efectivo esperado</span><span>{currency(cutResult.expectedCash)}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Efectivo contado</span><span>{currency(cutResult.closingCash)}</span></div>
+                  <div className="flex justify-between font-semibold"><span>Diferencia</span><span className={cutResult.difference === 0 ? 'text-accent' : 'text-destructive'}>{currency(cutResult.difference)}</span></div>
+                </div>
+              )}
               <Button
                 className="mt-2"
-                onClick={() => {
-                  setVentasTurno([])
-                  setCorteOpen(false)
-                  setCorteConfirmado(false)
+                onClick={async () => {
+                  try {
+                    await openCashSession()
+                    setCorteOpen(false)
+                    setCorteConfirmado(false)
+                  } catch (error) {
+                    toast.error(error instanceof Error ? error.message : 'No se pudo iniciar un nuevo turno')
+                  }
                 }}
               >
                 Iniciar nuevo turno
@@ -1124,6 +1817,20 @@ export function PosTerminal() {
                       <span className="text-primary">{currency(totalTurno)}</span>
                     </div>
                   </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="closing-cash">Efectivo contado en caja</Label>
+                  <Input
+                    id="closing-cash"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={cashCount}
+                    onChange={(event) => setCashCount(event.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Efectivo esperado: {currency((cashSession?.openingAmount ?? 0) + porMetodo.Efectivo)}
+                  </p>
                 </div>
 
                 {ventasTurno.length > 0 ? (
@@ -1168,11 +1875,11 @@ export function PosTerminal() {
                 </Button>
                 <Button
                   onClick={hacerCorte}
-                  disabled={ventasTurno.length === 0}
+                  disabled={!cashSessionReady || corteSaving}
                   className="gap-2"
                 >
                   <Printer className="size-4" />
-                  Hacer corte y enviar
+                  {corteSaving ? 'Guardando corte...' : 'Hacer corte y enviar'}
                 </Button>
               </DialogFooter>
             </>

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { getAuthenticatedUser } from '@/lib/auth'
 import { db } from '@/lib/db'
 
 export const runtime = 'nodejs'
@@ -23,33 +24,49 @@ type SaleBody = {
 }
 
 export async function POST(request: Request) {
-  const body = await request.json() as SaleBody
+  let body: SaleBody
+  try {
+    body = await request.json() as SaleBody
+  } catch {
+    return NextResponse.json({ error: 'Solicitud inválida' }, { status: 400 })
+  }
   if (!body.folio || !Array.isArray(body.items) || body.items.length === 0 || !Array.isArray(body.payments) || body.payments.length === 0) {
     return NextResponse.json({ error: 'Venta incompleta' }, { status: 400 })
   }
+
+  const user = await getAuthenticatedUser()
+  if (!user) return NextResponse.json({ error: 'Inicia sesión para registrar ventas' }, { status: 401 })
 
   let client: Awaited<ReturnType<typeof db.connect>> | undefined
   try {
     client = await db.connect()
     await client.query('BEGIN')
-    const cashier = await client.query<{ id: string }>(`
-      SELECT u.id
-      FROM app.users u
-      JOIN app.roles r ON r.id = u.role_id
-      WHERE u.active = true AND r.code IN ('cashier', 'admin')
-      ORDER BY CASE WHEN r.code = 'cashier' THEN 0 ELSE 1 END, u.created_at
+    const cashSession = await client.query<{ id: string }>(`
+      SELECT id
+      FROM app.cash_sessions
+      WHERE opened_by = $1 AND status = 'open'
+      ORDER BY opened_at DESC
       LIMIT 1
-    `)
-    if (cashier.rowCount === 0) {
+      FOR UPDATE
+    `, [user.id])
+    if (cashSession.rowCount === 0) {
       await client.query('ROLLBACK')
-      return NextResponse.json({ error: 'No hay un usuario activo para registrar la venta' }, { status: 400 })
+      return NextResponse.json({ error: 'No hay un turno de caja abierto para este usuario' }, { status: 409 })
     }
 
     const sale = await client.query<{ id: string }>(`
-      INSERT INTO app.sales (folio, cashier_id, subtotal, discount_amount, tax_amount, total, payers_count)
-      VALUES ($1, $2, $3, $4, 0, $5, $6)
+      INSERT INTO app.sales (folio, cash_session_id, cashier_id, subtotal, discount_amount, tax_amount, total, payers_count)
+      VALUES ($1, $2, $3, $4, $5, 0, $6, $7)
       RETURNING id
-    `, [body.folio, cashier.rows[0].id, body.subtotal, body.discountAmount, body.total, Math.max(1, body.payersCount || 1)])
+    `, [
+      body.folio,
+      cashSession.rows[0].id,
+      user.id,
+      body.subtotal,
+      body.discountAmount,
+      body.total,
+      Math.max(1, body.payersCount || 1),
+    ])
 
     for (const item of body.items) {
       let productId: string | null = null
@@ -62,14 +79,23 @@ export async function POST(request: Request) {
         productId = product.rows[0].id
         if (product.rows[0].track_stock) {
           const stockBefore = Number(product.rows[0].stock)
-          if (stockBefore < item.quantity) throw new Error(`Existencias insuficientes para ${item.description}`)
+          const reserved = await client.query<{ quantity: string }>(`
+            SELECT COALESCE(SUM(i.quantity), 0) AS quantity
+            FROM app.open_account_items i
+            JOIN app.open_accounts a ON a.id = i.account_id
+            WHERE i.product_id = $1 AND a.status = 'open'
+          `, [productId])
+          const availableStock = stockBefore - Number(reserved.rows[0].quantity)
+          if (availableStock < item.quantity) {
+            throw new Error(`Existencias insuficientes para ${item.description}`)
+          }
           const stockAfter = stockBefore - item.quantity
           await client.query('UPDATE app.products SET stock = $1, updated_at = now() WHERE id = $2', [stockAfter, productId])
           await client.query(`
             INSERT INTO app.inventory_movements
               (product_id, user_id, movement_type, quantity, stock_before, stock_after, reference_type, reference_id)
             VALUES ($1, $2, 'sale', $3, $4, $5, 'sale', $6)
-          `, [productId, cashier.rows[0].id, item.quantity, stockBefore, stockAfter, sale.rows[0].id])
+          `, [productId, user.id, item.quantity, stockBefore, stockAfter, sale.rows[0].id])
         }
       }
       await client.query(`

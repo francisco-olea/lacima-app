@@ -11,6 +11,9 @@
 `008_cashier_pos_only.sql` limita el rol Caja al punto de venta y sus turnos.
 `009_user_management_sessions.sql` agrega sesiones de usuario y sus índices.
 `010_rental_products.sql` identifica las rentas y elimina existencias ficticias de productos que no controlan inventario.
+`011_francisco_admin.sql` crea o habilita el usuario Administrador Francisco con una contraseña aleatoria no conocida.
+`012_deactivate_demo_sponsors.sql` desactiva los registros de patrocinadores de demostración.
+`013_open_accounts.sql` agrega cuentas abiertas de clientes y sus artículos.
 
 ## Aplicar la migracion
 
@@ -33,6 +36,9 @@ psql -U postgres -d lacima -f database/007_admin_and_passwords.sql
 psql -U postgres -d lacima -f database/008_cashier_pos_only.sql
 psql -U postgres -d lacima -f database/009_user_management_sessions.sql
 psql -U postgres -d lacima -f database/010_rental_products.sql
+psql -U postgres -d lacima -f database/011_francisco_admin.sql
+psql -U postgres -d lacima -f database/012_deactivate_demo_sponsors.sql
+psql -U postgres -d lacima -f database/013_open_accounts.sql
 ```
 
 La migracion es repetible y no borra datos existentes. Requiere permiso para crear la extension `pgcrypto`.
@@ -50,6 +56,7 @@ Son usuarios de la aplicacion almacenados en `app.users`. El acceso utiliza `use
 | Caja | `Andrea` | `CajaAndrea2026!` |
 
 Cambia las contrasenas antes de usar la aplicacion en un entorno real. Las contrasenas no se guardan en texto plano: el script las convierte a `bcrypt` mediante `pgcrypto`.
+Para asignar la contraseña inicial de Francisco, ejecuta desde `psql` `SELECT app.change_user_password('Francisco', 'ESCRIBE_AQUI_UNA_CLAVE_SEGURA');`.
 
 ## Verificacion
 

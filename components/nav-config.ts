@@ -4,6 +4,7 @@ import {
   Boxes,
   IdCard,
   Handshake,
+  ClipboardList,
   BarChart3,
   Settings,
   type LucideIcon,
@@ -22,6 +23,7 @@ export const navItems: NavItem[] = [
   { label: 'Inventario', href: '/inventario', icon: Boxes, ready: true },
   { label: 'Membresías', href: '/membresias', icon: IdCard, ready: true },
   { label: 'Patrocinadores', href: '/patrocinadores', icon: Handshake, ready: true },
+  { label: 'Cortes', href: '/cortes', icon: ClipboardList, ready: true },
   { label: 'Reportes', href: '/reportes', icon: BarChart3, ready: true },
   { label: 'Configuración', href: '/configuracion', icon: Settings },
 ]

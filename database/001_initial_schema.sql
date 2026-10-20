@@ -237,6 +237,7 @@ CREATE INDEX IF NOT EXISTS products_name_idx ON app.products USING gin (to_tsvec
 CREATE INDEX IF NOT EXISTS inventory_movements_product_idx ON app.inventory_movements(product_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS sales_sold_at_idx ON app.sales(sold_at DESC);
 CREATE INDEX IF NOT EXISTS sales_cashier_idx ON app.sales(cashier_id, sold_at DESC);
+CREATE INDEX IF NOT EXISTS sales_cash_session_idx ON app.sales(cash_session_id, sold_at DESC);
 CREATE INDEX IF NOT EXISTS sale_items_product_idx ON app.sale_items(product_id);
 CREATE INDEX IF NOT EXISTS audit_log_created_at_idx ON app.audit_log(created_at DESC);
 
@@ -338,14 +339,6 @@ FROM (VALUES
 ) AS seed(sku, name, category, unit_price, stock, minimum_stock, track_stock)
 JOIN app.product_categories c ON c.name = seed.category
 ON CONFLICT (sku) DO NOTHING;
-
-INSERT INTO app.sponsors (company_name, contact_name, tier, starts_on, ends_on, contract_amount, benefit_hours)
-VALUES
-  ('Adrenalina Sports', 'M. Reyes', 'Platino', '2026-01-01', '2026-12-31', 250000, 120),
-  ('Cumbre Bebidas', 'J. Pena', 'Oro', '2026-03-01', '2027-02-28', 140000, 80),
-  ('Altura Wear', 'S. Gomez', 'Plata', '2026-05-15', '2026-11-15', 60000, 40),
-  ('Pico Nutrition', 'R. Vela', 'Oro', '2026-02-01', '2027-01-31', 120000, 80)
-ON CONFLICT DO NOTHING;
 
 COMMIT;
 

@@ -32,6 +32,7 @@ type SettingsState = {
   phone: string
   email: string
   address: string
+  rfc: string
   ticketHeader: string
   ticketFooter: string
   lowStockAlerts: boolean
@@ -40,11 +41,12 @@ type SettingsState = {
 
 const defaultSettings: SettingsState = {
   clubName: 'La Cima Padel Club',
-  phone: '+52 0000 0000',
+  phone: '+52 653 113 9424',
   email: 'contacto@lacimapadelclub.com',
-  address: 'San Luis RC, Sonora',
+  address: 'Av. Alvaro Obregón entre Samuel Ocaña y López Portillo, Parque Industrial, 83455,San Luis RC, Sonora',
+  rfc: 'CPC251013PC6',
   ticketHeader: 'La Cima Padel Club',
-  ticketFooter: 'Gracias por tu visita',
+  ticketFooter: '¡Gracias por tu visita!',
   lowStockAlerts: true,
   emailReports: false,
 }
@@ -196,6 +198,7 @@ export default function ConfiguracionPage() {
               <div className="space-y-2"><Label htmlFor="club-phone">Teléfono</Label><Input id="club-phone" value={settings.phone} onChange={(e) => update('phone', e.target.value)} /></div>
               <div className="space-y-2"><Label htmlFor="club-email">Correo de contacto</Label><Input id="club-email" type="email" value={settings.email} onChange={(e) => update('email', e.target.value)} /></div>
               <div className="space-y-2"><Label htmlFor="club-address">Dirección</Label><Input id="club-address" value={settings.address} onChange={(e) => update('address', e.target.value)} /></div>
+              <div className="space-y-2"><Label htmlFor="club-rfc">RFC</Label><Input id="club-rfc" value={settings.rfc} onChange={(e) => update('rfc', e.target.value.toUpperCase())} maxLength={13} placeholder="RFC del club" /></div>
             </div>
           </Card>
         </TabsContent>

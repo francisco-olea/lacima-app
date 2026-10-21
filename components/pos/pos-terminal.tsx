@@ -213,6 +213,9 @@ export function PosTerminal() {
   const [ticketToPrint, setTicketToPrint] = useState<TicketImprimible | null>(null)
   const [ticketHeader, setTicketHeader] = useState('La Cima Padel Club')
   const [ticketFooter, setTicketFooter] = useState('Gracias por tu visita')
+  const [ticketRfc, setTicketRfc] = useState('')
+  const [ticketAddress, setTicketAddress] = useState('')
+  const [ticketPhone, setTicketPhone] = useState('')
 
   // Ventas acumuladas del turno actual
   const [ventasTurno, setVentasTurno] = useState<VentaTurno[]>([])
@@ -376,9 +379,18 @@ export function PosTerminal() {
     const storedSettings = localStorage.getItem(SETTINGS_KEY)
     if (storedSettings) {
       try {
-        const settings = JSON.parse(storedSettings) as { ticketHeader?: unknown; ticketFooter?: unknown }
+        const settings = JSON.parse(storedSettings) as {
+          ticketHeader?: unknown
+          ticketFooter?: unknown
+          rfc?: unknown
+          address?: unknown
+          phone?: unknown
+        }
         if (typeof settings.ticketHeader === 'string') setTicketHeader(settings.ticketHeader)
         if (typeof settings.ticketFooter === 'string') setTicketFooter(settings.ticketFooter)
+        if (typeof settings.rfc === 'string') setTicketRfc(settings.rfc)
+        if (typeof settings.address === 'string') setTicketAddress(settings.address)
+        if (typeof settings.phone === 'string') setTicketPhone(settings.phone)
       } catch {
         toast.error('No se pudo cargar la configuración del comprobante')
       }
@@ -1674,6 +1686,9 @@ export function PosTerminal() {
           <article className="receipt-print">
             <header className="receipt-center">
               <h1>{ticketHeader}</h1>
+              {ticketRfc && <p>RFC: {ticketRfc}</p>}
+              {ticketAddress && <p>{ticketAddress}</p>}
+              {ticketPhone && <p>Tel. {ticketPhone}</p>}
               <p>COMPROBANTE DE VENTA</p>
             </header>
             <div className="receipt-divider" />

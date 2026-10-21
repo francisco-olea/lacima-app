@@ -14,3 +14,4 @@
 \ir 011_francisco_admin.sql
 \ir 012_deactivate_demo_sponsors.sql
 \ir 013_open_accounts.sql
+\ir 014_user_cash_sessions.sql

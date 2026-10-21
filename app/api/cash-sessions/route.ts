@@ -126,13 +126,9 @@ export async function POST(request: Request) {
                cs.opening_amount AS "openingAmount"
         FROM app.cash_sessions cs
         JOIN app.cash_registers cr ON cr.id = cs.register_id
-        WHERE cs.register_id = $1 AND cs.status = 'open'
+        WHERE cs.register_id = $1 AND cs.opened_by = $2 AND cs.status = 'open'
         FOR UPDATE OF cs
-      `, [register.rows[0].id])
-      if (existing.rowCount && existing.rows[0].opened_by !== auth.user.id) {
-        await client.query('ROLLBACK')
-        return NextResponse.json({ error: 'La caja sigue abierta por otro usuario. Solicita que realice su corte.' }, { status: 409 })
-      }
+      `, [register.rows[0].id, auth.user.id])
 
       let session = existing.rows[0]
       if (!session) {

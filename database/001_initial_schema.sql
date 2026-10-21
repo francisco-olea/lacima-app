@@ -79,8 +79,8 @@ CREATE TABLE IF NOT EXISTS app.cash_sessions (
   CHECK ((status = 'open' AND closed_at IS NULL AND closed_by IS NULL) OR status <> 'open')
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS one_open_session_per_register
-  ON app.cash_sessions(register_id) WHERE status = 'open';
+CREATE UNIQUE INDEX IF NOT EXISTS one_open_session_per_user_and_register
+  ON app.cash_sessions(register_id, opened_by) WHERE status = 'open';
 
 CREATE TABLE IF NOT EXISTS app.product_categories (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

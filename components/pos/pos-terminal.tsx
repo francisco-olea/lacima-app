@@ -222,7 +222,6 @@ export function PosTerminal() {
   const [turnoInicio, setTurnoInicio] = useState('--:--')
   const [cashSession, setCashSession] = useState<CashSessionResponse | null>(null)
   const [cashSessionReady, setCashSessionReady] = useState(false)
-  const [cashSessionWarning, setCashSessionWarning] = useState<string | null>(null)
   const [currentUsername, setCurrentUsername] = useState('Usuario')
   const [draftLoaded, setDraftLoaded] = useState(false)
 
@@ -293,7 +292,6 @@ export function PosTerminal() {
   }, [cart, descuento, draftLoaded, metodo, paymentAmount, payments, recibido, splitEnabled, splitPeople])
 
   const openCashSession = useCallback(async () => {
-    setCashSessionWarning(null)
     const response = await fetch('/api/cash-sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -301,10 +299,6 @@ export function PosTerminal() {
     })
     if (!response.ok) {
       const result = await response.json() as { error?: string }
-      if (response.status === 409 && result.error?.startsWith('La caja sigue abierta por otro usuario')) {
-        setCashSessionWarning(result.error)
-        return null
-      }
       throw new Error(result.error ?? 'No se pudo abrir el turno de caja')
     }
     const session = await response.json() as CashSessionResponse
@@ -956,14 +950,6 @@ export function PosTerminal() {
 
   return (
     <div className="mx-auto grid max-w-7xl grid-cols-1 gap-4 lg:grid-cols-[1fr_380px]">
-      {cashSessionWarning && (
-        <div
-          role="status"
-          className="col-span-full rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200"
-        >
-          {cashSessionWarning}
-        </div>
-      )}
       {/* Catálogo */}
       <div className="space-y-4">
         {/* Barra: búsqueda + botón corte de caja */}
@@ -1263,7 +1249,7 @@ export function PosTerminal() {
               <Button
                 size="lg"
                 className="mt-3 h-12 w-full gap-2 text-base"
-                disabled={cart.length === 0 || !cashSessionReady}
+                disabled={cart.length === 0}
                 onClick={openCheckout}
               >
                 <Banknote className="size-5" />

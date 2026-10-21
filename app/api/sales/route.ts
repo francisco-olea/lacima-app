@@ -44,14 +44,21 @@ export async function POST(request: Request) {
     const cashSession = await client.query<{ id: string }>(`
       SELECT id
       FROM app.cash_sessions
-      WHERE opened_by = $1 AND status = 'open'
-      ORDER BY opened_at DESC
+      WHERE register_id = (
+        SELECT id
+        FROM app.cash_registers
+        WHERE active = true
+        ORDER BY created_at
+        LIMIT 1
+      )
+        AND status = 'open'
+      ORDER BY (opened_by = $1) DESC, opened_at DESC
       LIMIT 1
       FOR UPDATE
     `, [user.id])
     if (cashSession.rowCount === 0) {
       await client.query('ROLLBACK')
-      return NextResponse.json({ error: 'No hay un turno de caja abierto para este usuario' }, { status: 409 })
+      return NextResponse.json({ error: 'No hay un turno abierto en la caja para registrar la venta' }, { status: 409 })
     }
 
     const sale = await client.query<{ id: string }>(`

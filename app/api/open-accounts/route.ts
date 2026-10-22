@@ -9,6 +9,15 @@ type OpenAccountBody = {
   customerName?: unknown
   accountId?: unknown
   productId?: unknown
+  method?: unknown
+  amount?: unknown
+}
+
+type AccountPaymentRow = {
+  id: string
+  accountId: string
+  method: 'cash' | 'card' | 'transfer'
+  amount: string
 }
 
 type AccountItemRow = {
@@ -28,10 +37,11 @@ type AccountRow = {
   customerName: string
   createdAt: string
   items: AccountItemRow[]
+  payments: AccountPaymentRow[]
 }
 
 async function readOpenAccounts(client: Awaited<ReturnType<typeof db.connect>>, sessionId: string) {
-  const accounts = await client.query<Omit<AccountRow, 'items'>>(`
+  const accounts = await client.query<Omit<AccountRow, 'items' | 'payments'>>(`
     SELECT id, customer_name AS "customerName", created_at AS "createdAt"
     FROM app.open_accounts
     WHERE cash_session_id = $1 AND status = 'open'
@@ -52,6 +62,16 @@ async function readOpenAccounts(client: Awaited<ReturnType<typeof db.connect>>, 
     WHERE a.cash_session_id = $1 AND a.status = 'open'
     ORDER BY i.created_at
   `, [sessionId])
+  const payments = await client.query<AccountPaymentRow>(`
+    SELECT p.id,
+           p.account_id AS "accountId",
+           p.payment_method AS method,
+           p.amount
+    FROM app.open_account_payments p
+    JOIN app.open_accounts a ON a.id = p.account_id
+    WHERE a.cash_session_id = $1 AND a.status = 'open'
+    ORDER BY p.paid_at, p.id
+  `, [sessionId])
   return accounts.rows.map((account) => ({
     ...account,
     total: 0,
@@ -66,6 +86,13 @@ async function readOpenAccounts(client: Awaited<ReturnType<typeof db.connect>>, 
         unitPrice: Number(item.unitPrice),
         discountAmount: Number(item.discountAmount),
         lineTotal: Number(item.lineTotal),
+      })),
+    payments: payments.rows
+      .filter((payment) => payment.accountId === account.id)
+      .map((payment) => ({
+        id: payment.id,
+        method: payment.method,
+        amount: Number(payment.amount),
       })),
   })).map((account) => ({
     ...account,
@@ -109,7 +136,7 @@ export async function POST(request: Request) {
 
   const user = await getAuthenticatedUser()
   if (!user) return NextResponse.json({ error: 'Inicia sesión para continuar' }, { status: 401 })
-  if (body.action !== 'create' && body.action !== 'add-item' && body.action !== 'cancel') {
+  if (body.action !== 'create' && body.action !== 'add-item' && body.action !== 'cancel' && body.action !== 'payment') {
     return NextResponse.json({ error: 'Acción de cuenta inválida' }, { status: 400 })
   }
   if (body.action === 'create' && (typeof body.customerName !== 'string'
@@ -121,6 +148,14 @@ export async function POST(request: Request) {
   }
   if (body.action === 'add-item' && (typeof body.productId !== 'string' || !body.productId)) {
     return NextResponse.json({ error: 'Selecciona una cuenta y un producto válidos' }, { status: 400 })
+  }
+  if (body.action === 'payment' && (
+    (body.method !== 'cash' && body.method !== 'card' && body.method !== 'transfer')
+    || typeof body.amount !== 'number'
+    || !Number.isFinite(body.amount)
+    || body.amount <= 0
+  )) {
+    return NextResponse.json({ error: 'Selecciona un método y un importe de abono válidos' }, { status: 400 })
   }
 
   const client = await db.connect()
@@ -150,6 +185,7 @@ export async function POST(request: Request) {
         ...result.rows[0],
         total: 0,
         items: [],
+        payments: [],
       }, { status: 201 })
     }
 
@@ -163,7 +199,47 @@ export async function POST(request: Request) {
       await client.query('ROLLBACK')
       return NextResponse.json({ error: 'La cuenta abierta no está disponible' }, { status: 404 })
     }
+    if (body.action === 'payment') {
+      const items = await client.query<{ total: string }>(`
+        SELECT COALESCE(SUM(line_total), 0) AS total
+        FROM app.open_account_items
+        WHERE account_id = $1
+      `, [body.accountId])
+      const existingPayments = await client.query<{ total: string }>(`
+        SELECT COALESCE(SUM(amount), 0) AS total
+        FROM app.open_account_payments
+        WHERE account_id = $1
+      `, [body.accountId])
+      const amountCents = Math.round((body.amount as number) * 100)
+      const totalCents = Math.round(Number(items.rows[0].total) * 100)
+      const paidCents = Math.round(Number(existingPayments.rows[0].total) * 100)
+      if (totalCents === 0) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'Agrega artículos antes de registrar un abono' }, { status: 400 })
+      }
+      if (amountCents <= 0 || amountCents > totalCents - paidCents) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'El abono no puede superar el saldo pendiente' }, { status: 409 })
+      }
+      await client.query(`
+        INSERT INTO app.open_account_payments (account_id, payment_method, amount)
+        VALUES ($1, $2, $3)
+      `, [body.accountId, body.method, amountCents / 100])
+      const accounts = await readOpenAccounts(client, session.rows[0].id)
+      const saved = accounts.find((openAccount) => openAccount.id === body.accountId)
+      await client.query('COMMIT')
+      return NextResponse.json(saved)
+    }
     if (body.action === 'cancel') {
+      const existingPayments = await client.query<{ count: string }>(`
+        SELECT COUNT(*) AS count
+        FROM app.open_account_payments
+        WHERE account_id = $1
+      `, [body.accountId])
+      if (Number(existingPayments.rows[0].count) > 0) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'No se puede cancelar una cuenta con abonos registrados' }, { status: 409 })
+      }
       await client.query(`
         UPDATE app.open_accounts
         SET status = 'cancelled', updated_at = now()
@@ -262,7 +338,6 @@ export async function PATCH(request: Request) {
       let body: OpenAccountBody & {
         folio?: unknown
         payersCount?: unknown
-        payments?: unknown
       }
       try {
         body = await request.json() as typeof body
@@ -274,18 +349,8 @@ export async function PATCH(request: Request) {
         || typeof body.folio !== 'string' || !body.folio.trim()
         || (body.payersCount !== undefined && (
           typeof body.payersCount !== 'number' || !Number.isInteger(body.payersCount) || body.payersCount < 1
-        ))
-        || !Array.isArray(body.payments) || body.payments.length === 0) {
+        ))) {
         return NextResponse.json({ error: 'Datos de cobro de la cuenta incompletos' }, { status: 400 })
-      }
-      const payments = body.payments as { method?: unknown; amount?: unknown }[]
-      if (payments.some((payment) => (
-        (payment.method !== 'cash' && payment.method !== 'card' && payment.method !== 'transfer')
-        || typeof payment.amount !== 'number'
-        || !Number.isFinite(payment.amount)
-        || payment.amount <= 0
-      ))) {
-        return NextResponse.json({ error: 'Métodos o importes de pago inválidos' }, { status: 400 })
       }
 
       const user = await getAuthenticatedUser()
@@ -339,10 +404,27 @@ export async function PATCH(request: Request) {
           return NextResponse.json({ error: 'Agrega artículos antes de cobrar la cuenta' }, { status: 400 })
         }
         const total = items.rows.reduce((sum, item) => sum + Number(item.lineTotal), 0)
-        const paid = payments.reduce((sum, payment) => sum + (payment.amount as number), 0)
-        if (Math.abs(total - paid) > 0.01) {
+        const paymentsResult = await client.query<{
+          method: 'cash' | 'card' | 'transfer'
+          amount: string
+        }>(`
+          SELECT payment_method AS method, amount
+          FROM app.open_account_payments
+          WHERE account_id = $1
+          ORDER BY paid_at, id
+        `, [body.accountId])
+        const payments = paymentsResult.rows.map((payment) => ({
+          method: payment.method,
+          amount: Number(payment.amount),
+        }))
+        const paidCents = payments.reduce((sum, payment) => sum + Math.round(payment.amount * 100), 0)
+        if (Math.round(total * 100) !== paidCents) {
           await client.query('ROLLBACK')
-          return NextResponse.json({ error: 'Los pagos deben cubrir el total completo de la cuenta' }, { status: 400 })
+          return NextResponse.json({ error: 'Registra abonos que cubran el total completo antes de cerrar la cuenta' }, { status: 400 })
+        }
+        if (payments.length === 0) {
+          await client.query('ROLLBACK')
+          return NextResponse.json({ error: 'Registra al menos un abono antes de cerrar la cuenta' }, { status: 400 })
         }
 
         const sale = await client.query<{ id: string }>(`

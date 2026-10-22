@@ -25,6 +25,8 @@ type CashSession = {
   }[]
 }
 
+type OpenAccountPayment = { method: string; amount: string }
+
 async function requireUser() {
   const user = await getAuthenticatedUser()
   if (!user) return { response: NextResponse.json({ error: 'Inicia sesión para continuar' }, { status: 401 }) }
@@ -57,7 +59,21 @@ async function getSessionSales(client: Awaited<ReturnType<typeof db.connect>>, s
   }))
 }
 
-function sessionResponse(session: CashSession, sales: CashSession['sales']) {
+async function getOpenAccountPayments(client: Awaited<ReturnType<typeof db.connect>>, sessionId: string) {
+  const result = await client.query<OpenAccountPayment>(`
+    SELECT p.payment_method AS method, p.amount
+    FROM app.open_account_payments p
+    JOIN app.open_accounts a ON a.id = p.account_id
+    WHERE a.cash_session_id = $1 AND a.status = 'open'
+  `, [sessionId])
+  return result.rows
+}
+
+function sessionResponse(
+  session: CashSession,
+  sales: CashSession['sales'],
+  openAccountPayments: OpenAccountPayment[] = [],
+) {
   const totals = { cash: 0, card: 0, transfer: 0 }
   let total = 0
   for (const sale of sales) {
@@ -66,6 +82,13 @@ function sessionResponse(session: CashSession, sales: CashSession['sales']) {
       if (payment.method === 'cash' || payment.method === 'card' || payment.method === 'transfer') {
         totals[payment.method] += Number(payment.amount)
       }
+    }
+  }
+  for (const payment of openAccountPayments) {
+    const amount = Number(payment.amount)
+    total += amount
+    if (payment.method === 'cash' || payment.method === 'card' || payment.method === 'transfer') {
+      totals[payment.method] += amount
     }
   }
   return {
@@ -140,8 +163,9 @@ export async function POST(request: Request) {
         session = { ...created.rows[0], register: register.rows[0].name }
       }
       const sales = await getSessionSales(client, session.id)
+      const openAccountPayments = await getOpenAccountPayments(client, session.id)
       await client.query('COMMIT')
-      return NextResponse.json(sessionResponse(session, sales))
+      return NextResponse.json(sessionResponse(session, sales, openAccountPayments))
     }
 
     const sessionResult = await client.query<CashSession>(`

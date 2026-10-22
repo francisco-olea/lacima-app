@@ -74,12 +74,18 @@ type OpenAccountItem = {
   discountAmount: number
   lineTotal: number
 }
+type OpenAccountPayment = {
+  id: string
+  method: 'cash' | 'card' | 'transfer'
+  amount: number
+}
 type OpenAccount = {
   id: string
   customerName: string
   createdAt: string
   total: number
   items: OpenAccountItem[]
+  payments: OpenAccountPayment[]
 }
 type DetalleTicket = { nombre: string; cantidad: number; precio: number; importe: number }
 type TicketImprimible = {
@@ -154,6 +160,14 @@ function isPago(value: unknown): value is Pago {
     && typeof payment.monto === 'number'
     && Number.isFinite(payment.monto)
     && payment.monto > 0
+}
+
+function toPago(payment: OpenAccountPayment): Pago {
+  return {
+    id: payment.id,
+    metodo: payment.method === 'cash' ? 'Efectivo' : payment.method === 'card' ? 'Tarjeta' : 'Transferencia',
+    monto: payment.amount,
+  }
 }
 
 function isPosDraft(value: unknown): value is PosDraft {
@@ -647,8 +661,8 @@ export function PosTerminal() {
 
   async function chargeOpenAccount(accountPayments: Pago[]) {
     if (!checkoutAccount) return
-    const amount = accountPayments.reduce((sum, payment) => sum + payment.monto, 0)
-    if (Math.abs(amount - checkoutAccount.total) > 0.01) {
+    const paidCents = accountPayments.reduce((sum, payment) => sum + Math.round(payment.monto * 100), 0)
+    if (paidCents !== Math.round(checkoutAccount.total * 100)) {
       toast.error('Para cerrar la cuenta, el pago debe cubrir el total completo')
       return
     }
@@ -662,10 +676,6 @@ export function PosTerminal() {
         accountId: checkoutAccount.id,
         folio,
         payersCount: splitEnabled ? Math.max(2, Number(splitPeople) || 2) : accountPayments.length,
-        payments: accountPayments.map((payment) => ({
-          method: payment.metodo === 'Efectivo' ? 'cash' : payment.metodo === 'Tarjeta' ? 'card' : 'transfer',
-          amount: payment.monto,
-        })),
       }),
     })
     if (!response.ok) {
@@ -732,12 +742,24 @@ export function PosTerminal() {
   }
 
   async function confirmSale() {
-    const amount = paymentValue || remainingAmount
-    if (amount <= 0 || amount > remainingAmount + 0.01) {
+    if (checkoutAccount && Math.round(remainingAmount * 100) === 0) {
+      setAccountSaving(true)
+      try {
+        await chargeOpenAccount(payments)
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'No se pudo cobrar la cuenta abierta')
+      } finally {
+        setAccountSaving(false)
+      }
+      return
+    }
+
+    const amount = Math.round((paymentValue || remainingAmount) * 100) / 100
+    if (amount <= 0 || Math.round(amount * 100) > Math.round(remainingAmount * 100)) {
       toast.error('El monto debe ser mayor a cero y no superar el saldo pendiente')
       return
     }
-    if (metodo === 'Efectivo' && (Number.parseFloat(recibido) || 0) < amount) {
+    if (!checkoutAccount && metodo === 'Efectivo' && (Number.parseFloat(recibido) || 0) < amount) {
       toast.error('El monto recibido es insuficiente')
       return
     }
@@ -747,18 +769,39 @@ export function PosTerminal() {
     const updatedRemaining = Math.max(0, checkoutTotal - updatedPaidAmount)
 
     if (checkoutAccount) {
-      if (updatedRemaining > 0.01) {
-        setPayments(updatedPayments)
-        setPaymentAmount((updatedRemaining / Math.max(1, Number(splitPeople) - updatedPayments.length)).toFixed(2))
-        setRecibido('')
-        toast.success('Pago registrado', { description: `Saldo pendiente: ${currency(updatedRemaining)}` })
-        return
-      }
       setAccountSaving(true)
       try {
-        await chargeOpenAccount(updatedPayments)
+        const response = await fetch('/api/open-accounts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'payment',
+            accountId: checkoutAccount.id,
+            method: metodo === 'Efectivo' ? 'cash' : metodo === 'Tarjeta' ? 'card' : 'transfer',
+            amount,
+          }),
+        })
+        if (!response.ok) {
+          const result = await response.json() as { error?: string }
+          throw new Error(result.error ?? 'No se pudo registrar el abono')
+        }
+        const updatedAccount = await response.json() as OpenAccount
+        const accountPayments = updatedAccount.payments.map(toPago)
+        const accountPaidCents = accountPayments.reduce((sum, item) => sum + Math.round(item.monto * 100), 0)
+        const accountRemainingCents = Math.max(0, Math.round(updatedAccount.total * 100) - accountPaidCents)
+        const accountRemaining = accountRemainingCents / 100
+        setOpenAccounts((current) => current.map((account) => account.id === updatedAccount.id ? updatedAccount : account))
+        setCheckoutAccount(updatedAccount)
+        setPayments(accountPayments)
+        setPaymentAmount(accountRemaining > 0 ? accountRemaining.toFixed(2) : '')
+        setRecibido('')
+        if (accountRemaining > 0.01) {
+          toast.success('Abono registrado', { description: `Saldo pendiente: ${currency(accountRemaining)}` })
+          return
+        }
+        await chargeOpenAccount(accountPayments)
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : 'No se pudo cobrar la cuenta abierta')
+        toast.error(error instanceof Error ? error.message : 'No se pudo registrar el abono')
       } finally {
         setAccountSaving(false)
       }
@@ -893,10 +936,11 @@ export function PosTerminal() {
       return
     }
     setCheckoutAccount(account)
-    setPayments([])
+    setPayments(account.payments.map(toPago))
     setMetodo('Efectivo')
     setRecibido('')
-    setPaymentAmount(account.total.toFixed(2))
+    const paid = account.payments.reduce((sum, payment) => sum + payment.amount, 0)
+    setPaymentAmount(Math.max(0, account.total - paid).toFixed(2))
     setCheckoutOpen(true)
   }
 
@@ -937,7 +981,9 @@ export function PosTerminal() {
   }
 
   // Totales del turno por método de pago
+  const openAccountPayments = openAccounts.flatMap((account) => account.payments)
   const totalTurno = ventasTurno.reduce((a, v) => a + v.total, 0)
+    + openAccountPayments.reduce((sum, payment) => sum + payment.amount, 0)
   const porMetodo = ventasTurno.reduce(
     (acc, venta) => {
       for (const pago of venta.pagos) {
@@ -947,6 +993,10 @@ export function PosTerminal() {
     },
     { Efectivo: 0, Tarjeta: 0, Transferencia: 0 },
   )
+  for (const payment of openAccountPayments) {
+    const method = payment.method === 'cash' ? 'Efectivo' : payment.method === 'card' ? 'Tarjeta' : 'Transferencia'
+    porMetodo[method] += payment.amount
+  }
 
   return (
     <div className="mx-auto grid max-w-7xl grid-cols-1 gap-4 lg:grid-cols-[1fr_380px]">
@@ -1291,6 +1341,8 @@ export function PosTerminal() {
                 </div>
               ) : openAccounts.map((account) => {
                 const selected = account.id === selectedAccountId
+                const paid = account.payments.reduce((sum, payment) => sum + payment.amount, 0)
+                const balance = Math.max(0, account.total - paid)
                 return (
                   <div
                     key={account.id}
@@ -1313,6 +1365,12 @@ export function PosTerminal() {
                       </span>
                       <span className="shrink-0 text-sm font-semibold text-primary">{currency(account.total)}</span>
                     </button>
+                    {paid > 0 && (
+                      <div className="mt-2 flex justify-between text-xs">
+                        <span className="text-muted-foreground">Abonado {currency(paid)}</span>
+                        <span className="font-medium">Saldo {currency(balance)}</span>
+                      </div>
+                    )}
                     {selected && (
                       <>
                         {account.items.length > 0 ? (
@@ -1337,16 +1395,21 @@ export function PosTerminal() {
                           disabled={!cashSessionReady || account.items.length === 0 || accountSaving}
                         >
                           <Banknote className="size-4" />
-                          Cobrar cuenta · {currency(account.total)}
+                          {balance > 0 ? 'Abonar a cuenta' : 'Cerrar cuenta'} · {currency(balance)}
                         </Button>
                         <Button
                           variant="outline"
                           className="mt-2 w-full text-destructive hover:text-destructive"
                           onClick={() => void cancelOpenAccount(account)}
-                          disabled={accountSaving}
+                          disabled={accountSaving || paid > 0}
                         >
                           Cancelar cuenta
                         </Button>
+                        {paid > 0 && (
+                          <p className="mt-1 text-center text-xs text-muted-foreground">
+                            No se puede cancelar una cuenta con abonos registrados.
+                          </p>
+                        )}
                       </>
                     )}
                   </div>
@@ -1514,7 +1577,7 @@ export function PosTerminal() {
               )}
             </div>
             <div>
-              <Label className="mb-2 block text-sm">Método de pago</Label>
+              <Label className="mb-2 block text-sm">{checkoutAccount ? 'Abonar · método de pago' : 'Método de pago'}</Label>
               <div className="grid grid-cols-3 gap-2">
                 {(
                   [
@@ -1540,7 +1603,7 @@ export function PosTerminal() {
               </div>
             </div>
 
-            {metodo === 'Efectivo' && (
+            {metodo === 'Efectivo' && !checkoutAccount && (
               <div className="space-y-2">
                 <Label htmlFor="recibido" className="text-sm">
                   Efectivo recibido
@@ -1641,7 +1704,9 @@ export function PosTerminal() {
             </Button>
             <Button onClick={confirmSale} className="gap-2" disabled={accountSaving}>
               <Printer className="size-4" />
-              {remainingAmount > 0.01 ? 'Registrar pago' : 'Confirmar e imprimir'}
+              {checkoutAccount
+                ? remainingAmount > 0 ? 'Abonar' : 'Cerrar cuenta e imprimir'
+                : remainingAmount > 0.01 ? 'Registrar pago' : 'Confirmar e imprimir'}
             </Button>
           </DialogFooter>
         </DialogContent>

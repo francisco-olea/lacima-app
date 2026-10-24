@@ -199,6 +199,10 @@
   display: none;
 }
 
+.cash-cut-print-root {
+  display: none;
+}
+
 @media print {
   @page {
     margin: 0;
@@ -217,11 +221,14 @@
   }
 
   .receipt-print-root,
-  .receipt-print-root * {
+  .receipt-print-root *,
+  .cash-cut-print-root,
+  .cash-cut-print-root * {
     visibility: visible !important;
   }
 
-  .receipt-print-root {
+  .receipt-print-root,
+  .cash-cut-print-root {
     position: absolute;
     top: 0;
     left: 0;
@@ -232,6 +239,10 @@
     background: #fff !important;
     font-family: Arial, sans-serif;
     font-size: 10pt;
+  }
+
+  body[data-printing-cash-cut="true"] .receipt-print-root {
+    display: none !important;
   }
 
   .receipt-print {

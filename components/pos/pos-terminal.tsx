@@ -921,6 +921,16 @@ export function PosTerminal() {
     toast.success('Se abrió el diálogo de impresión')
   }
 
+  function imprimirCorte() {
+    const resetPrintMode = () => {
+      document.body.removeAttribute('data-printing-cash-cut')
+    }
+    window.addEventListener('afterprint', resetPrintMode, { once: true })
+    document.body.setAttribute('data-printing-cash-cut', 'true')
+    window.print()
+    toast.success('Se abrió el diálogo de impresión')
+  }
+
   function openCheckout() {
     setCheckoutAccount(null)
     setPayments([])
@@ -1781,6 +1791,75 @@ export function PosTerminal() {
         )}
       </div>
 
+      <div className="cash-cut-print-root" aria-hidden="true">
+        <article className="receipt-print">
+          <header className="receipt-center">
+            <h1>{ticketHeader}</h1>
+            <p>CORTE DE CAJA</p>
+            <p>Responsable: {currentUsername}</p>
+            <p>Turno iniciado: {turnoInicio}</p>
+            {cashSession && <p>Caja: {cashSession.register}</p>}
+          </header>
+          <div className="receipt-divider" />
+          <p className="receipt-label">RESUMEN DEL TURNO</p>
+          <div className="receipt-row"><span>Fondo inicial</span><span>{currency(cashSession?.openingAmount ?? 0)}</span></div>
+          {(['Efectivo', 'Tarjeta', 'Transferencia'] as MetodoPago[]).map((paymentMethod) => (
+            <div className="receipt-row" key={paymentMethod}>
+              <span>{paymentMethod}</span>
+              <span>{currency(porMetodo[paymentMethod])}</span>
+            </div>
+          ))}
+          <div className="receipt-row receipt-total"><strong>Total del turno</strong><strong>{currency(totalTurno)}</strong></div>
+          <div className="receipt-divider" />
+          <p className="receipt-label">EFECTIVO</p>
+          <div className="receipt-row">
+            <span>Efectivo esperado</span>
+            <span>{currency((cashSession?.openingAmount ?? 0) + porMetodo.Efectivo)}</span>
+          </div>
+          <div className="receipt-row">
+            <span>Efectivo contado</span>
+            <span>{cashCount.trim() && Number.isFinite(Number(cashCount)) ? currency(Number(cashCount)) : 'Sin capturar'}</span>
+          </div>
+          <div className="receipt-row">
+            <span>Diferencia</span>
+            <span>
+              {cashCount.trim() && Number.isFinite(Number(cashCount))
+                ? currency(Number(cashCount) - ((cashSession?.openingAmount ?? 0) + porMetodo.Efectivo))
+                : 'Sin capturar'}
+            </span>
+          </div>
+          <div className="receipt-divider" />
+          <p className="receipt-label">VENTAS ({ventasTurno.length})</p>
+          {ventasTurno.length > 0 ? (
+            ventasTurno.map((sale) => (
+              <div className="receipt-item" key={sale.id}>
+                <p>{sale.folio} · {sale.hora}</p>
+                <div className="receipt-row">
+                  <span>{sale.metodo}</span>
+                  <strong>{currency(sale.total)}</strong>
+                </div>
+              </div>
+            ))
+          ) : (
+            <p>Sin ventas registradas.</p>
+          )}
+          {openAccountPayments.length > 0 && (
+            <>
+              <div className="receipt-divider" />
+              <p className="receipt-label">ABONOS A CUENTAS ABIERTAS</p>
+              {openAccounts.flatMap((account) => account.payments.map((payment) => (
+                <div className="receipt-row" key={payment.id}>
+                  <span>{account.customerName} · {payment.method === 'cash' ? 'Efectivo' : payment.method === 'card' ? 'Tarjeta' : 'Transferencia'}</span>
+                  <span>{currency(payment.amount)}</span>
+                </div>
+              )))}
+            </>
+          )}
+          <div className="receipt-divider" />
+          <footer className="receipt-center">Fin del corte</footer>
+        </article>
+      </div>
+
       {/* Diálogo producto sin código */}
       <Dialog open={manualOpen} onOpenChange={setManualOpen}>
         <DialogContent className="sm:max-w-sm">
@@ -1935,16 +2014,19 @@ export function PosTerminal() {
                 )}
               </div>
 
-              <DialogFooter className="gap-2 sm:gap-0">
+              <DialogFooter className="flex-row flex-wrap justify-end gap-2">
                 <Button variant="outline" onClick={() => setCorteOpen(false)}>
                   Volver
+                </Button>
+                <Button variant="outline" onClick={imprimirCorte} className="gap-2">
+                  <Printer className="size-4" />
+                  Imprimir
                 </Button>
                 <Button
                   onClick={hacerCorte}
                   disabled={!cashSessionReady || corteSaving}
                   className="gap-2"
                 >
-                  <Printer className="size-4" />
                   {corteSaving ? 'Guardando corte...' : 'Hacer corte y enviar'}
                 </Button>
               </DialogFooter>

@@ -1,6 +1,6 @@
 'use client'
 
-import { Minus, Pencil, Plus, Save, Trash2, X } from 'lucide-react'
+import { MessageSquareText, Minus, Pencil, Plus, Save, Trash2, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -14,6 +14,11 @@ import { toast } from 'sonner'
 const categorias = ['Todos', 'Bebidas', 'Snacks', 'Equipo', 'Ropa', 'Servicios'] as const
 
 type Categoria = (typeof categorias)[number]
+type ProductNote = {
+  id: string
+  note: string
+  createdAt: string
+}
 
 async function responseError(response: Response, fallback: string) {
   try {
@@ -33,6 +38,11 @@ export default function InventarioPage() {
   const [editOpen, setEditOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
+  const [notesProduct, setNotesProduct] = useState<Product | null>(null)
+  const [productNotes, setProductNotes] = useState<ProductNote[]>([])
+  const [notesLoading, setNotesLoading] = useState(false)
+  const [noteSaving, setNoteSaving] = useState(false)
+  const [newNote, setNewNote] = useState('')
   const [editProduct, setEditProduct] = useState({ nombre: '', codigo: '', categoria: 'Bebidas' as Product['categoria'], tipo: 'Inventario' as Product['tipo'], precio: '', existencias: '0', inventarioMinimo: '0' })
   const [newProduct, setNewProduct] = useState({ nombre: '', codigo: '', categoria: 'Bebidas' as Product['categoria'], tipo: 'Inventario' as Product['tipo'], precio: '', existencias: '0', inventarioMinimo: '0' })
 
@@ -55,6 +65,36 @@ export default function InventarioPage() {
     void loadProducts()
     return () => { mounted = false }
   }, [])
+
+  useEffect(() => {
+    if (!notesProduct) {
+      setProductNotes([])
+      setNewNote('')
+      return
+    }
+
+    const controller = new AbortController()
+    setNotesLoading(true)
+    fetch(`/api/products/${encodeURIComponent(notesProduct.id)}/notes`, {
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(await responseError(response, 'No se pudieron cargar las notas'))
+        return response.json() as Promise<ProductNote[]>
+      })
+      .then(setProductNotes)
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          toast.error(error instanceof Error ? error.message : 'No se pudieron cargar las notas')
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setNotesLoading(false)
+      })
+
+    return () => controller.abort()
+  }, [notesProduct])
 
   const filtered = useMemo(
     () =>
@@ -189,6 +229,33 @@ export default function InventarioPage() {
     setDeleteOpen(false)
     setSelectedProduct(null)
     toast.success('Producto eliminado')
+  }
+
+  async function addNote(event: React.FormEvent) {
+    event.preventDefault()
+    if (!notesProduct || !newNote.trim()) return
+
+    setNoteSaving(true)
+    try {
+      const response = await fetch(`/api/products/${encodeURIComponent(notesProduct.id)}/notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note: newNote.trim() }),
+      })
+      if (!response.ok) {
+        toast.error(await responseError(response, 'No se pudo guardar la nota'))
+        return
+      }
+
+      const savedNote = await response.json() as ProductNote
+      setProductNotes((current) => [savedNote, ...current])
+      setNewNote('')
+      toast.success('Nota agregada al artículo')
+    } catch {
+      toast.error('No se pudo conectar con el servidor para guardar la nota')
+    } finally {
+      setNoteSaving(false)
+    }
   }
 
   return (
@@ -351,6 +418,9 @@ export default function InventarioPage() {
                     </td>
                     <td className="px-4 py-4 align-top">
                       <div className="flex justify-end gap-2">
+                        <Button type="button" variant="outline" size="icon" onClick={() => setNotesProduct(producto)} aria-label={`Notas de ${producto.nombre}`}>
+                          <MessageSquareText className="size-4" />
+                        </Button>
                         <Button type="button" variant="outline" size="icon" onClick={() => openEdit(producto)} aria-label={`Editar ${producto.nombre}`}>
                           <Pencil className="size-4" />
                         </Button>
@@ -373,6 +443,59 @@ export default function InventarioPage() {
           </table>
         </div>
       </Card>
+
+      <Dialog open={notesProduct !== null} onOpenChange={(open) => { if (!open) setNotesProduct(null) }}>
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Notas del artículo</DialogTitle>
+            <DialogDescription>
+              {notesProduct?.nombre} · Registra movimientos o información relevante para su inventario.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={addNote} className="space-y-3">
+            <div className="space-y-2">
+              <Label htmlFor="product-note">Nueva nota</Label>
+              <textarea
+                id="product-note"
+                required
+                maxLength={1000}
+                rows={3}
+                value={newNote}
+                onChange={(event) => setNewNote(event.target.value)}
+                placeholder="Ej. Se tomaron 5 artículos para un evento"
+                className="flex min-h-24 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+              />
+            </div>
+            <div className="flex justify-end">
+              <Button type="submit" disabled={noteSaving || !newNote.trim()}>
+                {noteSaving ? 'Guardando...' : 'Agregar nota'}
+              </Button>
+            </div>
+          </form>
+          <div className="space-y-3">
+            <h3 className="text-sm font-medium">Historial</h3>
+            {notesLoading ? (
+              <p className="text-sm text-muted-foreground">Cargando notas...</p>
+            ) : productNotes.length > 0 ? (
+              <ul className="space-y-2">
+                {productNotes.map((note) => (
+                  <li key={note.id} className="rounded-xl border border-border bg-muted/30 p-3">
+                    <p className="whitespace-pre-wrap break-words text-sm">{note.note}</p>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      {new Date(note.createdAt).toLocaleString('es-MX')}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-muted-foreground">Este artículo todavía no tiene notas.</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setNotesProduct(null)}>Cerrar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent>

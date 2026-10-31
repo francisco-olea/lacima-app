@@ -1,6 +1,6 @@
 'use client'
 
-import { MessageSquareText, Minus, Pencil, Plus, Save, Trash2, X } from 'lucide-react'
+import { History, MessageSquareText, Pencil, Plus, Save, SlidersHorizontal, Trash2, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -17,6 +17,15 @@ type Categoria = (typeof categorias)[number]
 type ProductNote = {
   id: string
   note: string
+  createdAt: string
+}
+type InventoryMovement = {
+  id: string
+  type: string
+  quantity: number
+  stockBefore: number
+  stockAfter: number
+  reason: string | null
   createdAt: string
 }
 
@@ -43,8 +52,16 @@ export default function InventarioPage() {
   const [notesLoading, setNotesLoading] = useState(false)
   const [noteSaving, setNoteSaving] = useState(false)
   const [newNote, setNewNote] = useState('')
-  const [editProduct, setEditProduct] = useState({ nombre: '', codigo: '', categoria: 'Bebidas' as Product['categoria'], tipo: 'Inventario' as Product['tipo'], precio: '', existencias: '0', inventarioMinimo: '0' })
-  const [newProduct, setNewProduct] = useState({ nombre: '', codigo: '', categoria: 'Bebidas' as Product['categoria'], tipo: 'Inventario' as Product['tipo'], precio: '', existencias: '0', inventarioMinimo: '0' })
+  const [movementProduct, setMovementProduct] = useState<Product | null>(null)
+  const [movements, setMovements] = useState<InventoryMovement[]>([])
+  const [movementsLoading, setMovementsLoading] = useState(false)
+  const [adjustmentProduct, setAdjustmentProduct] = useState<Product | null>(null)
+  const [adjustmentType, setAdjustmentType] = useState<'in' | 'out'>('in')
+  const [adjustmentQuantity, setAdjustmentQuantity] = useState('1')
+  const [adjustmentReason, setAdjustmentReason] = useState('')
+  const [adjustmentSaving, setAdjustmentSaving] = useState(false)
+  const [editProduct, setEditProduct] = useState({ nombre: '', codigo: '', categoria: 'Bebidas' as Product['categoria'], tipo: 'Inventario' as Product['tipo'], precio: '', inventarioMinimo: '0', motivoInventario: '' })
+  const [newProduct, setNewProduct] = useState({ nombre: '', codigo: '', categoria: 'Bebidas' as Product['categoria'], tipo: 'Inventario' as Product['tipo'], precio: '', existencias: '0', inventarioMinimo: '0', motivoInventario: '' })
 
   useEffect(() => {
     let mounted = true
@@ -112,29 +129,64 @@ export default function InventarioPage() {
     (producto) => producto.tipo === 'Inventario' && producto.inventarioMinimo > 0 && producto.existencias <= producto.inventarioMinimo,
   ).length
 
-  async function persistStock(producto: Product, next: number) {
-    const response = await fetch('/api/products', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ codigo: producto.codigo, existencias: next }),
-    })
-    if (!response.ok) throw new Error((await response.json()).error ?? 'No se pudo guardar el inventario')
+  async function saveStockAdjustment(event: React.FormEvent) {
+    event.preventDefault()
+    if (!adjustmentProduct) return
+    const quantity = Number(adjustmentQuantity)
+    if (!Number.isFinite(quantity) || quantity <= 0 || !adjustmentReason.trim()) {
+      toast.error('Indica una cantidad y el motivo del ajuste')
+      return
+    }
+    const adjustment = adjustmentType === 'in' ? quantity : -quantity
+    if (adjustmentProduct.existencias + adjustment < 0) {
+      toast.error('No puedes retirar más existencias de las disponibles')
+      return
+    }
+
+    setAdjustmentSaving(true)
+    try {
+      const response = await fetch('/api/products', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ codigo: adjustmentProduct.codigo, ajuste: adjustment, motivoInventario: adjustmentReason.trim() }),
+      })
+      if (!response.ok) {
+        toast.error(await responseError(response, 'No se pudo guardar el ajuste'))
+        return
+      }
+      const savedProduct = await response.json() as Product
+      setItems((current) => current.map((item) => item.id === savedProduct.id ? savedProduct : item))
+      setAdjustmentProduct(null)
+      setAdjustmentQuantity('1')
+      setAdjustmentReason('')
+      toast.success('Existencias actualizadas')
+    } catch {
+      toast.error('No se pudo conectar con el servidor para guardar el ajuste')
+    } finally {
+      setAdjustmentSaving(false)
+    }
   }
 
-  function updateStock(id: string, next: number) {
-    const producto = items.find((item) => item.id === id)
-    if (!producto || producto.tipo === 'Renta' || Number.isNaN(next)) return
-    const safeNext = Math.max(0, next)
-    setItems((prev) => prev.map((item) => item.id === id ? { ...item, existencias: safeNext } : item))
-    void persistStock(producto, safeNext).catch((error: unknown) => {
-      setItems((prev) => prev.map((item) => item.id === id ? { ...item, existencias: producto.existencias } : item))
-      toast.error(error instanceof Error ? error.message : 'No se pudo guardar el inventario')
-    })
+  function openStockAdjustment(product: Product) {
+    setAdjustmentProduct(product)
+    setAdjustmentType('in')
+    setAdjustmentQuantity('1')
+    setAdjustmentReason('')
   }
 
-  function changeStock(id: string, delta: number) {
-    const producto = items.find((item) => item.id === id)
-    if (producto) updateStock(id, producto.existencias + delta)
+  async function openMovementHistory(product: Product) {
+    setMovementProduct(product)
+    setMovements([])
+    setMovementsLoading(true)
+    try {
+      const response = await fetch(`/api/products/${encodeURIComponent(product.id)}/movements`, { cache: 'no-store' })
+      if (!response.ok) throw new Error(await responseError(response, 'No se pudo cargar el historial'))
+      setMovements(await response.json() as InventoryMovement[])
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo cargar el historial')
+    } finally {
+      setMovementsLoading(false)
+    }
   }
 
   async function addProduct(event: React.FormEvent) {
@@ -143,6 +195,10 @@ export default function InventarioPage() {
     const stock = Number(newProduct.existencias)
     const minimum = Number(newProduct.inventarioMinimo)
     if (!newProduct.nombre.trim() || !newProduct.codigo.trim() || !Number.isFinite(price) || price < 0) return
+    if (newProduct.tipo === 'Inventario' && stock > 0 && !newProduct.motivoInventario.trim()) {
+      toast.error('Indica el motivo de las existencias iniciales')
+      return
+    }
     try {
       const response = await fetch('/api/products', {
         method: 'POST',
@@ -155,6 +211,7 @@ export default function InventarioPage() {
           precio: price,
           existencias: newProduct.tipo === 'Inventario' ? Math.max(0, stock || 0) : 0,
           inventarioMinimo: newProduct.tipo === 'Inventario' ? Math.max(0, minimum || 0) : 0,
+          motivoInventario: newProduct.motivoInventario.trim(),
         }),
       })
       if (!response.ok) {
@@ -163,7 +220,7 @@ export default function InventarioPage() {
       }
       const savedProduct = await response.json() as Product
       setItems((current) => [savedProduct, ...current])
-      setNewProduct({ nombre: '', codigo: '', categoria: 'Bebidas', tipo: 'Inventario', precio: '', existencias: '0', inventarioMinimo: '0' })
+      setNewProduct({ nombre: '', codigo: '', categoria: 'Bebidas', tipo: 'Inventario', precio: '', existencias: '0', inventarioMinimo: '0', motivoInventario: '' })
       setAddOpen(false)
     } catch {
       toast.error('No se pudo conectar con el servidor para guardar el producto')
@@ -172,7 +229,7 @@ export default function InventarioPage() {
 
   function openEdit(producto: Product) {
     setSelectedProduct(producto)
-    setEditProduct({ nombre: producto.nombre, codigo: producto.codigo, categoria: producto.categoria, tipo: producto.tipo, precio: String(producto.precio), existencias: String(producto.existencias), inventarioMinimo: String(producto.inventarioMinimo) })
+    setEditProduct({ nombre: producto.nombre, codigo: producto.codigo, categoria: producto.categoria, tipo: producto.tipo, precio: String(producto.precio), inventarioMinimo: String(producto.inventarioMinimo), motivoInventario: '' })
     setEditOpen(true)
   }
 
@@ -180,10 +237,13 @@ export default function InventarioPage() {
     event.preventDefault()
     if (!selectedProduct) return
     const price = Number(editProduct.precio)
-    const stock = Number(editProduct.existencias)
     const minimum = Number(editProduct.inventarioMinimo)
-    if (!editProduct.nombre.trim() || !editProduct.codigo.trim() || !Number.isFinite(price) || price < 0 || !Number.isFinite(stock) || stock < 0 || !Number.isFinite(minimum) || minimum < 0) {
+    if (!editProduct.nombre.trim() || !editProduct.codigo.trim() || !Number.isFinite(price) || price < 0 || !Number.isFinite(minimum) || minimum < 0) {
       toast.error('Completa los datos del producto')
+      return
+    }
+    if (selectedProduct.tipo === 'Inventario' && editProduct.tipo !== 'Inventario' && selectedProduct.existencias > 0 && !editProduct.motivoInventario.trim()) {
+      toast.error('Indica el motivo para retirar las existencias antes de cambiar el tipo')
       return
     }
 
@@ -197,8 +257,9 @@ export default function InventarioPage() {
         categoria: editProduct.categoria,
         tipo: editProduct.tipo,
         precio: price,
-        existencias: editProduct.tipo === 'Inventario' ? stock : 0,
+        existencias: editProduct.tipo === 'Inventario' ? selectedProduct.existencias : 0,
         inventarioMinimo: editProduct.tipo === 'Inventario' ? minimum : 0,
+        motivoInventario: editProduct.motivoInventario.trim(),
       }),
     })
     if (!response.ok) {
@@ -371,35 +432,17 @@ export default function InventarioPage() {
                         <span className="text-muted-foreground">No se controla</span>
                       ) : (
                         <>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              type="button"
-                              onClick={() => changeStock(producto.id, -1)}
-                              aria-label={`Reducir existencias de ${producto.nombre}`}
-                            >
-                              <Minus className="size-4" />
-                            </Button>
-                            <Input
-                              type="number"
-                              min={0}
-                              value={producto.existencias}
-                              onChange={(event) => updateStock(producto.id, Number(event.target.value))}
-                              className="h-10 w-24 text-center"
-                              aria-label={`Existencias de ${producto.nombre}`}
-                            />
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              type="button"
-                              onClick={() => changeStock(producto.id, 1)}
-                              aria-label={`Aumentar existencias de ${producto.nombre}`}
-                            >
-                              <Plus className="size-4" />
-                            </Button>
-                          </div>
+                          <p className="font-medium">{producto.existencias}</p>
                           <p className="mt-2 text-xs text-muted-foreground">Mín {producto.inventarioMinimo}</p>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="mt-2 gap-2"
+                            onClick={() => openStockAdjustment(producto)}
+                          >
+                            <SlidersHorizontal className="size-4" /> Ajustar
+                          </Button>
                         </>
                       )}
                       {bajo && (
@@ -418,6 +461,11 @@ export default function InventarioPage() {
                     </td>
                     <td className="px-4 py-4 align-top">
                       <div className="flex justify-end gap-2">
+                        {producto.tipo === 'Inventario' && (
+                          <Button type="button" variant="outline" size="icon" onClick={() => void openMovementHistory(producto)} aria-label={`Historial de inventario de ${producto.nombre}`}>
+                            <History className="size-4" />
+                          </Button>
+                        )}
                         <Button type="button" variant="outline" size="icon" onClick={() => setNotesProduct(producto)} aria-label={`Notas de ${producto.nombre}`}>
                           <MessageSquareText className="size-4" />
                         </Button>
@@ -443,6 +491,72 @@ export default function InventarioPage() {
           </table>
         </div>
       </Card>
+
+      <Dialog open={adjustmentProduct !== null} onOpenChange={(open) => { if (!open) { setAdjustmentProduct(null); setAdjustmentReason('') } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Ajustar existencias</DialogTitle>
+            <DialogDescription>
+              {adjustmentProduct?.nombre} · Existencias actuales: {adjustmentProduct?.existencias}
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={saveStockAdjustment} className="space-y-4">
+            <div className="grid grid-cols-2 rounded-lg border border-border p-1">
+              <button type="button" onClick={() => setAdjustmentType('in')} className={`rounded-md px-3 py-2 text-sm font-medium ${adjustmentType === 'in' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`} aria-pressed={adjustmentType === 'in'}>
+                Agregar
+              </button>
+              <button type="button" onClick={() => setAdjustmentType('out')} className={`rounded-md px-3 py-2 text-sm font-medium ${adjustmentType === 'out' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`} aria-pressed={adjustmentType === 'out'}>
+                Retirar
+              </button>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="adjustment-quantity">Cantidad</Label>
+              <Input id="adjustment-quantity" type="number" min="0.001" step="0.001" required value={adjustmentQuantity} onChange={(event) => setAdjustmentQuantity(event.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="adjustment-reason">Motivo</Label>
+              <textarea id="adjustment-reason" required maxLength={1000} rows={3} value={adjustmentReason} onChange={(event) => setAdjustmentReason(event.target.value)} placeholder="Describe por qué cambia la existencia" className="flex min-h-24 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50" />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setAdjustmentProduct(null)}>Cancelar</Button>
+              <Button type="submit" disabled={adjustmentSaving || !adjustmentReason.trim()}>{adjustmentSaving ? 'Guardando...' : 'Guardar ajuste'}</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={movementProduct !== null} onOpenChange={(open) => { if (!open) setMovementProduct(null) }}>
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Historial de inventario</DialogTitle>
+            <DialogDescription>{movementProduct?.nombre} · Entradas y retiros registrados.</DialogDescription>
+          </DialogHeader>
+          {movementsLoading ? (
+            <p className="py-4 text-sm text-muted-foreground">Cargando historial...</p>
+          ) : movements.length > 0 ? (
+            <ul className="space-y-2">
+              {movements.map((movement) => (
+                <li key={movement.id} className="rounded-lg border border-border p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="font-medium">
+                      {movement.type === 'adjustment_in' || movement.type === 'initial' ? 'Entrada' : movement.type === 'adjustment_out' ? 'Retiro' : movement.type === 'sale' ? 'Venta' : movement.type === 'purchase' ? 'Compra' : movement.type === 'return' ? 'Devolución' : 'Movimiento'}
+                      {' · '}{movement.quantity}
+                    </p>
+                    <p className="shrink-0 text-xs text-muted-foreground">{new Date(movement.createdAt).toLocaleString('es-MX')}</p>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">Existencias: {movement.stockBefore} → {movement.stockAfter}</p>
+                  {movement.reason && <p className="mt-2 whitespace-pre-wrap break-words text-sm">{movement.reason}</p>}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="py-4 text-sm text-muted-foreground">Este producto todavía no tiene movimientos.</p>
+          )}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setMovementProduct(null)}>Cerrar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={notesProduct !== null} onOpenChange={(open) => { if (!open) setNotesProduct(null) }}>
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
@@ -505,7 +619,10 @@ export default function InventarioPage() {
             <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="new-category">Categoría</Label><select id="new-category" value={newProduct.categoria} onChange={(e) => setNewProduct({ ...newProduct, categoria: e.target.value as Product['categoria'] })} className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm">{categorias.filter((category) => category !== 'Todos').map((category) => <option key={category}>{category}</option>)}</select></div><div className="space-y-2"><Label htmlFor="new-price">Precio</Label><Input id="new-price" required type="number" min="0" step="0.01" value={newProduct.precio} onChange={(e) => setNewProduct({ ...newProduct, precio: e.target.value })} /></div></div>
             <div className="space-y-2"><Label htmlFor="new-type">Tipo</Label><select id="new-type" value={newProduct.tipo} onChange={(e) => setNewProduct({ ...newProduct, tipo: e.target.value as Product['tipo'] })} className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"><option>Inventario</option><option>Renta</option><option>Servicio</option></select></div>
             {newProduct.tipo === 'Inventario' ? (
-              <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="new-stock">Existencias</Label><Input id="new-stock" type="number" min="0" value={newProduct.existencias} onChange={(e) => setNewProduct({ ...newProduct, existencias: e.target.value })} /></div><div className="space-y-2"><Label htmlFor="new-minimum">Mínimo de inventario</Label><Input id="new-minimum" type="number" min="0" value={newProduct.inventarioMinimo} onChange={(e) => setNewProduct({ ...newProduct, inventarioMinimo: e.target.value })} /></div></div>
+              <>
+                <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="new-stock">Existencias iniciales</Label><Input id="new-stock" type="number" min="0" step="0.001" value={newProduct.existencias} onChange={(e) => setNewProduct({ ...newProduct, existencias: e.target.value })} /></div><div className="space-y-2"><Label htmlFor="new-minimum">Mínimo de inventario</Label><Input id="new-minimum" type="number" min="0" value={newProduct.inventarioMinimo} onChange={(e) => setNewProduct({ ...newProduct, inventarioMinimo: e.target.value })} /></div></div>
+                {Number(newProduct.existencias) > 0 && <div className="space-y-2"><Label htmlFor="new-stock-reason">Motivo de las existencias iniciales</Label><textarea id="new-stock-reason" required maxLength={1000} rows={2} value={newProduct.motivoInventario} onChange={(e) => setNewProduct({ ...newProduct, motivoInventario: e.target.value })} className="flex min-h-20 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50" /></div>}
+              </>
             ) : (
               <p className="text-sm text-muted-foreground">Las rentas y servicios no llevan existencias ni se descuentan al venderse.</p>
             )}
@@ -532,11 +649,17 @@ export default function InventarioPage() {
             <div className="space-y-2"><Label htmlFor="edit-type">Tipo</Label><select id="edit-type" value={editProduct.tipo} onChange={(e) => setEditProduct({ ...editProduct, tipo: e.target.value as Product['tipo'] })} className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"><option>Inventario</option><option>Renta</option><option>Servicio</option></select></div>
             {editProduct.tipo === 'Inventario' ? (
               <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-2"><Label htmlFor="edit-stock">Existencias</Label><Input id="edit-stock" required type="number" min="0" value={editProduct.existencias} onChange={(e) => setEditProduct({ ...editProduct, existencias: e.target.value })} /></div>
                 <div className="space-y-2"><Label htmlFor="edit-minimum">Mínimo de inventario</Label><Input id="edit-minimum" required type="number" min="0" value={editProduct.inventarioMinimo} onChange={(e) => setEditProduct({ ...editProduct, inventarioMinimo: e.target.value })} /></div>
+                <p className="self-center text-sm text-muted-foreground">Existencias actuales: {selectedProduct?.existencias}</p>
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">Las rentas y servicios no llevan existencias ni se descuentan al venderse.</p>
+            )}
+            {selectedProduct?.tipo === 'Inventario' && editProduct.tipo !== 'Inventario' && selectedProduct.existencias > 0 && (
+              <div className="space-y-2">
+                <Label htmlFor="edit-stock-reason">Motivo del retiro de {selectedProduct.existencias} existencias</Label>
+                <textarea id="edit-stock-reason" required maxLength={1000} rows={2} value={editProduct.motivoInventario} onChange={(e) => setEditProduct({ ...editProduct, motivoInventario: e.target.value })} className="flex min-h-20 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50" />
+              </div>
             )}
             <DialogFooter><Button type="button" variant="outline" onClick={() => setEditOpen(false)}><X className="size-4" /> Cancelar</Button><Button type="submit"><Save className="size-4" /> Confirmar cambios</Button></DialogFooter>
           </form>

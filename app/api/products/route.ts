@@ -65,7 +65,10 @@ export async function POST(request: Request) {
     precio?: number
     existencias?: number
     inventarioMinimo?: number
+    motivoInventario?: string
   }
+  const initialStock = body.tipo === 'Inventario' ? Math.max(0, body.existencias ?? 0) : 0
+  const inventoryReason = body.motivoInventario?.trim() ?? ''
 
   if (
     !body.codigo?.trim()
@@ -76,12 +79,15 @@ export async function POST(request: Request) {
     || (body.tipo !== undefined && body.tipo !== 'Inventario' && body.tipo !== 'Renta' && body.tipo !== 'Servicio')
     || (body.existencias !== undefined && (!Number.isFinite(body.existencias) || body.existencias < 0))
     || (body.inventarioMinimo !== undefined && (!Number.isFinite(body.inventarioMinimo) || body.inventarioMinimo < 0))
+    || (initialStock > 0 && (!inventoryReason || inventoryReason.length > 1000))
   ) {
-    return NextResponse.json({ error: 'Datos de producto inválidos' }, { status: 400 })
+    return NextResponse.json({ error: initialStock > 0 && !inventoryReason ? 'Indica el motivo de las existencias iniciales' : 'Datos de producto inválidos' }, { status: 400 })
   }
 
+  const client = await db.connect()
   try {
-    const result = await db.query<ProductRow>(`
+    await client.query('BEGIN')
+    const result = await client.query<ProductRow>(`
       INSERT INTO app.products (sku, name, category_id, unit_price, stock, minimum_stock, track_stock, is_rental, active)
       VALUES ($1, $2, (SELECT id FROM app.product_categories WHERE name = $3), $4, $5, $6, $7, $8, true)
       RETURNING id, sku AS codigo, name AS nombre, $3::text AS categoria,
@@ -93,14 +99,23 @@ export async function POST(request: Request) {
       body.nombre.trim(),
       body.categoria.trim(),
       body.precio,
-      body.tipo === 'Inventario' ? Math.max(0, body.existencias ?? 0) : 0,
+      initialStock,
       body.tipo === 'Inventario' ? Math.max(0, body.inventarioMinimo ?? 0) : 0,
       body.tipo === 'Inventario',
       body.tipo === 'Renta',
     ])
 
+    if (initialStock > 0) {
+      await client.query(`
+        INSERT INTO app.inventory_movements
+          (product_id, movement_type, quantity, stock_before, stock_after, notes)
+        VALUES ($1, 'initial', $2, 0, $2, $3)
+      `, [result.rows[0].id, initialStock, inventoryReason])
+    }
+    await client.query('COMMIT')
     return NextResponse.json(toProduct(result.rows[0]), { status: 201 })
   } catch (error) {
+    await client.query('ROLLBACK')
     const databaseError = error as { code?: string; constraint?: string }
     if (databaseError.code === '23505' && databaseError.constraint?.includes('products_sku')) {
       return NextResponse.json({ error: `El código ${body.codigo.trim()} ya existe. Usa un código diferente.` }, { status: 409 })
@@ -110,6 +125,8 @@ export async function POST(request: Request) {
     }
     console.error('POST /api/products failed', error)
     return NextResponse.json({ error: 'No se pudo guardar el producto en PostgreSQL' }, { status: 500 })
+  } finally {
+    client.release()
   }
 }
 
@@ -122,13 +139,17 @@ export async function PATCH(request: Request) {
     tipo?: 'Inventario' | 'Renta' | 'Servicio'
     precio?: number
     existencias?: number
+    ajuste?: number
     inventarioMinimo?: number
+    motivoInventario?: string
   }
   const isEdit = body.nombre !== undefined || body.nuevoCodigo !== undefined || body.categoria !== undefined || body.tipo !== undefined || body.precio !== undefined || body.inventarioMinimo !== undefined
+  const isAdjustment = body.ajuste !== undefined
   if (
     !body.codigo?.trim()
-    || !Number.isFinite(body.existencias)
-    || body.existencias! < 0
+    || (isAdjustment
+      ? (!Number.isFinite(body.ajuste) || body.ajuste === 0)
+      : (!Number.isFinite(body.existencias) || body.existencias! < 0))
     || (body.tipo !== undefined && body.tipo !== 'Inventario' && body.tipo !== 'Renta' && body.tipo !== 'Servicio')
     || (body.inventarioMinimo !== undefined && (!Number.isFinite(body.inventarioMinimo) || body.inventarioMinimo < 0))
   ) {
@@ -151,7 +172,15 @@ export async function PATCH(request: Request) {
     const currentStock = currentTrackStock ? Number(product.rows[0].stock) : 0
     const nextTrackStock = body.tipo === undefined ? currentTrackStock : body.tipo === 'Inventario'
     const nextIsRental = body.tipo === undefined ? product.rows[0].is_rental : body.tipo === 'Renta'
-    const nextStock = nextTrackStock ? body.existencias! : 0
+    if (isAdjustment && (!currentTrackStock || !nextTrackStock)) {
+      throw new Error('Solo puedes ajustar productos con inventario controlado')
+    }
+    const nextStock = isAdjustment
+      ? currentStock + body.ajuste!
+      : nextTrackStock ? body.existencias! : 0
+    if (nextStock < 0) {
+      throw new Error('No puedes retirar más existencias de las disponibles')
+    }
     const updated = await client.query<ProductRow>(`
       UPDATE app.products p
       SET sku = COALESCE($1, p.sku),
@@ -184,11 +213,15 @@ export async function PATCH(request: Request) {
       throw new Error('La categoría no existe')
     }
     if ((currentTrackStock || nextTrackStock) && nextStock !== currentStock) {
+      const inventoryReason = body.motivoInventario?.trim() ?? ''
+      if (!inventoryReason || inventoryReason.length > 1000) {
+        throw new Error('Indica el motivo del ajuste de existencias')
+      }
       await client.query(`
         INSERT INTO app.inventory_movements
           (product_id, movement_type, quantity, stock_before, stock_after, notes)
         VALUES ($1, $2, $3, $4, $5, $6)
-      `, [product.rows[0].id, nextStock > currentStock ? 'adjustment_in' : 'adjustment_out', Math.abs(nextStock - currentStock), currentStock, nextStock, 'Ajuste desde inventario'])
+      `, [product.rows[0].id, nextStock > currentStock ? 'adjustment_in' : 'adjustment_out', Math.abs(nextStock - currentStock), currentStock, nextStock, inventoryReason])
     }
     await client.query('COMMIT')
     return NextResponse.json(toProduct(updated.rows[0]))

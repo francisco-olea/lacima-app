@@ -14,6 +14,11 @@ type SaleRow = {
 }
 
 type HourRow = { hour: number; amount: string }
+type ProductRow = {
+  id: string
+  name: string
+  sku: string
+}
 type LowStockRow = {
   id: string
   name: string
@@ -43,7 +48,7 @@ export async function GET() {
       month: '2-digit',
       day: '2-digit',
     }).format(new Date())
-    const [salesResult, hoursResult, inventoryResult, sponsorsResult] = await Promise.all([
+    const [salesResult, hoursResult, productsResult, inventoryResult, sponsorsResult] = await Promise.all([
       db.query<SaleRow>(`
         SELECT s.id,
                s.folio,
@@ -78,6 +83,11 @@ export async function GET() {
         GROUP BY hour
         ORDER BY hour
       `, [reportDate]),
+      db.query<ProductRow>(`
+        SELECT id, name, sku
+        FROM app.products
+        ORDER BY name
+      `),
       db.query<LowStockRow>(`
         SELECT p.id, p.name, c.name AS category, p.stock, p.minimum_stock AS "minimumStock"
         FROM app.products p
@@ -116,6 +126,11 @@ export async function GET() {
         amount: Number(payment.amount),
       })),
     }))
+    const products = productsResult.rows.map((product) => ({
+      id: product.id,
+      nombre: product.name,
+      sku: product.sku,
+    }))
     const paymentTotals = { Efectivo: 0, Tarjeta: 0, Transferencia: 0 }
     for (const sale of sales) {
       for (const payment of sale.payments) {
@@ -127,6 +142,7 @@ export async function GET() {
     return NextResponse.json({
       date: reportDate,
       sales,
+      products,
       totals: {
         sales: sales.reduce((sum, sale) => sum + sale.total, 0),
         tickets: sales.length,

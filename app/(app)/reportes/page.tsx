@@ -2,13 +2,20 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  BarChart3,
-  Download,
-  Handshake,
-  Receipt,
-  RefreshCw,
-  TriangleAlert,
-} from 'lucide-react'
+  Area,
+  AreaChart,
+  CartesianGrid,
+  Line,
+  XAxis,
+  YAxis,
+} from 'recharts'
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from '@/components/ui/chart'
+import { BarChart3, Download, Handshake, Package, Receipt, RefreshCw, TriangleAlert } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -24,9 +31,15 @@ type ReportSale = {
   items: number
   payments: ReportPayment[]
 }
+type ReportProduct = {
+  id: string
+  nombre: string
+  sku: string
+}
 type ReportData = {
   date: string
   sales: ReportSale[]
+  products: ReportProduct[]
   totals: {
     sales: number
     tickets: number
@@ -43,6 +56,13 @@ type ReportData = {
   }[]
   sponsors: { active: number; hoursUsed: number; hoursTotal: number }
 }
+type ProductDailySales = { fecha: string; unidades: number; ventas: number }
+type ProductTrend = { product: ReportProduct; dailySales: ProductDailySales[] }
+
+const productChartConfig = {
+  ventas: { label: 'Ventas', color: 'var(--primary)' },
+  unidades: { label: 'Unidades', color: 'var(--accent)' },
+} satisfies ChartConfig
 
 const methodColors: Record<string, string> = {
   Efectivo: 'bg-accent/15 text-accent border-transparent',
@@ -66,8 +86,23 @@ function formatDateTime(value: string) {
 }
 
 function formatDate(value: string) {
-  const [year, month, day] = value.split('-')
+  const [, year, month, day] = value.match(/^(\d{4})-(\d{2})-(\d{2})/) ?? []
+  if (!year || !month || !day) return value
   return `${day}/${month}/${year}`
+}
+
+function formatShortDate(value: string) {
+  const [, , month, day] = value.match(/^(\d{4})-(\d{2})-(\d{2})/) ?? []
+  if (!month || !day) return value
+  return `${day}/${month}`
+}
+
+function formatMonth(value: string) {
+  const [year, month] = value.split('-').map(Number)
+  return new Date(year, month - 1, 1).toLocaleDateString('es-MX', {
+    month: 'long',
+    year: 'numeric',
+  })
 }
 
 function paymentMethod(sale: ReportSale) {
@@ -77,10 +112,19 @@ function paymentMethod(sale: ReportSale) {
   return method ? paymentLabels[method] : 'Sin pago'
 }
 
+function formatQuantity(value: number) {
+  return value.toLocaleString('es-MX', { maximumFractionDigits: 3 })
+}
+
 export default function ReportesPage() {
   const [report, setReport] = useState<ReportData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [selectedProductId, setSelectedProductId] = useState('')
+  const [selectedMonth, setSelectedMonth] = useState('')
+  const [productTrend, setProductTrend] = useState<ProductTrend | null>(null)
+  const [productTrendLoading, setProductTrendLoading] = useState(false)
+  const [productTrendError, setProductTrendError] = useState<string | null>(null)
 
   const loadReport = useCallback(async () => {
     setLoading(true)
@@ -91,7 +135,14 @@ export default function ReportesPage() {
         const result = await response.json() as { error?: string }
         throw new Error(result.error ?? 'No se pudieron cargar los reportes')
       }
-      setReport(await response.json() as ReportData)
+      const result = await response.json() as ReportData
+      setReport(result)
+      setSelectedMonth((current) => current || result.date.slice(0, 7))
+      setSelectedProductId((current) => (
+        result.products.some((product) => product.id === current)
+          ? current
+          : result.products[0]?.id ?? ''
+      ))
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : 'No se pudieron cargar los reportes'
       setError(message)
@@ -105,6 +156,43 @@ export default function ReportesPage() {
     void loadReport()
   }, [loadReport])
 
+  useEffect(() => {
+    if (!selectedProductId) {
+      setProductTrend(null)
+      setProductTrendError(null)
+      setProductTrendLoading(false)
+      return
+    }
+
+    const controller = new AbortController()
+    async function loadProductTrend() {
+      setProductTrendLoading(true)
+      setProductTrendError(null)
+      setProductTrend(null)
+      try {
+        const response = await fetch(
+          `/api/reports/products?productId=${encodeURIComponent(selectedProductId)}&month=${encodeURIComponent(selectedMonth)}`,
+          { cache: 'no-store', signal: controller.signal },
+        )
+        if (!response.ok) {
+          const result = await response.json() as { error?: string }
+          throw new Error(result.error ?? 'No se pudieron cargar las ventas del producto')
+        }
+        setProductTrend(await response.json() as ProductTrend)
+      } catch (cause) {
+        if (controller.signal.aborted) return
+        const message = cause instanceof Error ? cause.message : 'No se pudieron cargar las ventas del producto'
+        setProductTrendError(message)
+        toast.error(message)
+      } finally {
+        if (!controller.signal.aborted) setProductTrendLoading(false)
+      }
+    }
+
+    void loadProductTrend()
+    return () => controller.abort()
+  }, [selectedProductId, selectedMonth])
+
   const salesByHour = useMemo(() => {
     const amounts = new Map((report?.salesByHour ?? []).map((point) => [point.hour, point.amount]))
     return Array.from({ length: 24 }, (_, hour) => ({
@@ -114,6 +202,13 @@ export default function ReportesPage() {
   }, [report?.salesByHour])
 
   const maxHourlySales = Math.max(...salesByHour.map((point) => point.amount), 0)
+  const productTotals = useMemo(() => (productTrend?.dailySales ?? []).reduce(
+    (totals, day) => ({
+      unidades: totals.unidades + day.unidades,
+      ventas: totals.ventas + day.ventas,
+    }),
+    { unidades: 0, ventas: 0 },
+  ), [productTrend?.dailySales])
 
   function exportCsv() {
     if (!report) return
@@ -261,6 +356,146 @@ export default function ReportesPage() {
           </CardContent>
         </Card>
       </section>
+
+      <Card className="overflow-hidden p-0">
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border px-5 py-4">
+          <div className="flex items-center gap-3">
+            <Package className="size-5 text-primary" />
+            <div>
+              <h2 className="text-lg font-semibold">Ventas por producto</h2>
+              <p className="text-sm text-muted-foreground">
+                Comportamiento diario del mes seleccionado.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 text-sm font-medium">
+              <span>Mes y año</span>
+              <input
+                type="month"
+                aria-label="Seleccionar mes y año del historial de ventas"
+                value={selectedMonth}
+                max={report?.date.slice(0, 7)}
+                onChange={(event) => setSelectedMonth(event.target.value)}
+                disabled={loading || !report}
+                className="h-10 rounded-lg border border-input bg-background px-3 text-sm"
+              />
+            </label>
+            <label className="flex items-center gap-2 text-sm font-medium">
+              <span>Producto</span>
+              <select
+                aria-label="Seleccionar producto para consultar sus ventas"
+                value={selectedProductId}
+                onChange={(event) => setSelectedProductId(event.target.value)}
+                disabled={loading || !report?.products.length}
+                className="h-10 min-w-56 rounded-lg border border-input bg-background px-3 text-sm"
+              >
+                {report?.products.map((product) => (
+                  <option key={product.id} value={product.id}>{product.nombre} · {product.sku}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </div>
+        <CardContent className="space-y-4 p-5">
+          {productTrend && (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="font-medium">{productTrend.product.nombre}</p>
+                <p className="text-xs text-muted-foreground">{productTrend.product.sku}</p>
+              </div>
+              <div className="flex gap-5">
+                <div>
+                  <p className="text-xs text-muted-foreground">Unidades en {formatMonth(selectedMonth)}</p>
+                  <p className="font-semibold">{formatQuantity(productTotals.unidades)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Ventas en {formatMonth(selectedMonth)}</p>
+                  <p className="font-semibold">{currency(productTotals.ventas)}</p>
+                </div>
+              </div>
+            </div>
+          )}
+          {productTrendLoading ? (
+            <div className="flex h-72 items-center justify-center text-sm text-muted-foreground">
+              Cargando ventas del producto…
+            </div>
+          ) : productTrendError ? (
+            <div role="alert" className="flex h-72 items-center justify-center text-sm text-destructive">
+              {productTrendError}
+            </div>
+          ) : loading ? (
+            <div className="flex h-72 items-center justify-center text-sm text-muted-foreground">
+              Cargando productos…
+            </div>
+          ) : !report?.products.length ? (
+            <div className="flex h-72 items-center justify-center text-sm text-muted-foreground">
+              No hay productos disponibles para consultar.
+            </div>
+          ) : productTrend ? (
+            <ChartContainer config={productChartConfig} className="h-72 w-full">
+              <AreaChart data={productTrend.dailySales} margin={{ left: 12, right: 12, top: 8, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="fillProductSales" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="var(--color-ventas)" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="var(--color-ventas)" stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                <XAxis
+                  dataKey="fecha"
+                  tickLine={false}
+                  axisLine={false}
+                  tickMargin={8}
+                  minTickGap={20}
+                  tickFormatter={formatShortDate}
+                />
+                <YAxis
+                  yAxisId="revenue"
+                  tickLine={false}
+                  axisLine={false}
+                  width={76}
+                  tickFormatter={(value) => currency(Number(value))}
+                />
+                <YAxis
+                  yAxisId="quantity"
+                  orientation="right"
+                  tickLine={false}
+                  axisLine={false}
+                  width={48}
+                  tickFormatter={(value) => formatQuantity(Number(value))}
+                />
+                <ChartTooltip
+                  content={
+                    <ChartTooltipContent
+                      labelFormatter={(label) => formatDate(String(label))}
+                      formatter={(value, name) => name === 'ventas'
+                        ? currency(Number(value))
+                        : `${formatQuantity(Number(value))} unidades`}
+                    />
+                  }
+                />
+                <Area
+                  yAxisId="revenue"
+                  dataKey="ventas"
+                  type="monotone"
+                  stroke="var(--color-ventas)"
+                  strokeWidth={2}
+                  fill="url(#fillProductSales)"
+                />
+                <Line
+                  yAxisId="quantity"
+                  dataKey="unidades"
+                  type="monotone"
+                  stroke="var(--color-unidades)"
+                  strokeWidth={2}
+                  dot={false}
+                />
+              </AreaChart>
+            </ChartContainer>
+          ) : null}
+        </CardContent>
+      </Card>
 
       <section className="grid gap-4 lg:grid-cols-2">
         <Card>

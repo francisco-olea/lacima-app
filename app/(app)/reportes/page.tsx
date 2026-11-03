@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import {
   Area,
   AreaChart,
@@ -15,11 +15,13 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from '@/components/ui/chart'
-import { BarChart3, Download, Handshake, Package, Receipt, RefreshCw, TriangleAlert } from 'lucide-react'
+import { BarChart3, Download, Handshake, Package, Receipt, RefreshCw, Trash2, TriangleAlert } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
 import { currency } from '@/lib/data'
 
 type ReportPayment = { method: 'cash' | 'card' | 'transfer'; amount: number }
@@ -125,6 +127,9 @@ export default function ReportesPage() {
   const [productTrend, setProductTrend] = useState<ProductTrend | null>(null)
   const [productTrendLoading, setProductTrendLoading] = useState(false)
   const [productTrendError, setProductTrendError] = useState<string | null>(null)
+  const [saleToDelete, setSaleToDelete] = useState<ReportSale | null>(null)
+  const [deleteConfirmation, setDeleteConfirmation] = useState('')
+  const [deletingSale, setDeletingSale] = useState(false)
 
   const loadReport = useCallback(async () => {
     setLoading(true)
@@ -227,6 +232,34 @@ export default function ReportesPage() {
     link.download = `reporte-ventas-${report.date}.csv`
     link.click()
     URL.revokeObjectURL(url)
+  }
+
+  async function deleteSale(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!saleToDelete || deletingSale) return
+
+    setDeletingSale(true)
+    try {
+      const response = await fetch(`/api/sales/${encodeURIComponent(saleToDelete.id)}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmation: deleteConfirmation }),
+      })
+      if (!response.ok) {
+        const result = await response.json() as { error?: string }
+        throw new Error(result.error ?? 'No se pudo eliminar la venta')
+      }
+
+      toast.success(`Se eliminó el ticket ${saleToDelete.folio}`)
+      setSaleToDelete(null)
+      setDeleteConfirmation('')
+      await loadReport()
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : 'No se pudo eliminar la venta'
+      toast.error(message)
+    } finally {
+      setDeletingSale(false)
+    }
   }
 
   const totals = report?.totals
@@ -567,6 +600,7 @@ export default function ReportesPage() {
                 <th className="px-5 py-3">Método</th>
                 <th className="px-5 py-3">Artículos</th>
                 <th className="px-5 py-3 text-right">Total</th>
+                <th className="px-5 py-3 text-right">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -579,24 +613,89 @@ export default function ReportesPage() {
                   </td>
                   <td className="px-5 py-3">{sale.items}</td>
                   <td className="px-5 py-3 text-right font-semibold">{currency(sale.total)}</td>
+                  <td className="px-5 py-3 text-right">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="gap-2 text-destructive hover:text-destructive"
+                      aria-label={`Eliminar ticket ${sale.folio}`}
+                      title={`Eliminar ticket ${sale.folio}`}
+                      disabled={loading}
+                      onClick={() => {
+                        setDeleteConfirmation('')
+                        setSaleToDelete(sale)
+                      }}
+                    >
+                      <Trash2 className="size-4" />
+                      Eliminar
+                    </Button>
+                  </td>
                 </tr>
               ))}
               {!loading && report?.sales.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-5 py-10 text-center text-muted-foreground">
+                  <td colSpan={6} className="px-5 py-10 text-center text-muted-foreground">
                     No hay ventas completadas registradas hoy.
                   </td>
                 </tr>
               )}
               {loading && (
                 <tr>
-                  <td colSpan={5} className="px-5 py-10 text-center text-muted-foreground">Cargando ventas…</td>
+                  <td colSpan={6} className="px-5 py-10 text-center text-muted-foreground">Cargando ventas…</td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
       </Card>
+
+      <Dialog
+        open={saleToDelete !== null}
+        onOpenChange={(open) => {
+          if (!open && !deletingSale) {
+            setSaleToDelete(null)
+            setDeleteConfirmation('')
+          }
+        }}
+      >
+        <DialogContent>
+          <form onSubmit={deleteSale} className="contents">
+            <DialogHeader>
+              <DialogTitle>¿Eliminar el ticket {saleToDelete?.folio}?</DialogTitle>
+              <DialogDescription>
+                La venta dejará de contar en los reportes y se repondrá el inventario descontado. Escribe <strong>Eliminar</strong> para confirmar.
+              </DialogDescription>
+            </DialogHeader>
+            <Input
+              type="text"
+              autoComplete="off"
+              aria-label="Escribe Eliminar para confirmar"
+              placeholder="Escribe Eliminar"
+              required
+              value={deleteConfirmation}
+              onChange={(event) => setDeleteConfirmation(event.target.value)}
+              disabled={deletingSale}
+            />
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setSaleToDelete(null)
+                  setDeleteConfirmation('')
+                }}
+                disabled={deletingSale}
+              >
+                Cancelar
+              </Button>
+              <Button type="submit" variant="destructive" disabled={deletingSale || deleteConfirmation !== 'Eliminar'}>
+                Eliminar
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

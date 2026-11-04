@@ -22,6 +22,7 @@ import { ThemeToggle } from '@/components/theme-toggle'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import type { AuthRole } from '@/lib/roles'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -56,13 +57,13 @@ function isActive(pathname: string, href: string) {
   return pathname.startsWith(href)
 }
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({ children, role: initialRole }: { children: React.ReactNode; role: AuthRole }) {
   const pathname = usePathname()
   const router = useRouter()
   const [moreOpen, setMoreOpen] = useState(false)
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false)
   const [loggingOut, setLoggingOut] = useState(false)
-  const [role, setRole] = useState<'admin' | 'cashier'>('cashier')
+  const [role, setRole] = useState<AuthRole>(initialRole)
   const [username, setUsername] = useState('Usuario')
   const moreRef = useRef<HTMLDivElement>(null)
 
@@ -70,7 +71,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     fetch('/api/auth/session', { cache: 'no-store' })
       .then(async (response) => {
         if (!response.ok) return
-        const user = await response.json() as { role?: 'admin' | 'cashier'; username?: string }
+        const user = await response.json() as { role?: AuthRole; username?: string }
         if (user.role) setRole(user.role)
         if (user.username) setUsername(user.username)
       })
@@ -78,7 +79,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [])
 
   const isAdmin = role === 'admin'
-  const visiblePrimaryNav = isAdmin ? PRIMARY_NAV : PRIMARY_NAV.filter((item) => item.href === '/pos')
+  const posLabel = role === 'snacks'
+    ? 'Punto de Venta · Snacks'
+    : role === 'beverages'
+      ? 'Punto de Venta · Bebidas'
+      : 'Punto de Venta'
+  const visiblePrimaryNav = isAdmin
+    ? PRIMARY_NAV
+    : [{ ...PRIMARY_NAV[0], label: posLabel }]
   const visibleMoreNav = isAdmin ? MORE_NAV : []
 
   // Find current page label
@@ -207,7 +215,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               aria-current={active ? 'page' : undefined}
             >
               <Icon className={cn('size-5', active && 'drop-shadow-sm')} />
-              <span className="truncate">{item.label === 'Punto de Venta' ? 'Venta' : item.label}</span>
+              <span className="truncate">{item.href === '/pos' && role === 'snacks' ? 'Snacks' : item.href === '/pos' && role === 'beverages' ? 'Bebidas' : item.label === 'Punto de Venta' ? 'Venta' : item.label}</span>
             </Link>
           )
         })}

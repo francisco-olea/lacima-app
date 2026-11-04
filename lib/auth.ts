@@ -1,13 +1,14 @@
 import { createHash } from 'node:crypto'
 import { cookies } from 'next/headers'
 import { db } from '@/lib/db'
+import type { AuthRole } from '@/lib/roles'
 
 export const SESSION_COOKIE = 'lc-session'
 
 export type AuthUser = {
   id: string
   username: string
-  role: 'admin' | 'cashier'
+  role: AuthRole
 }
 
 function hashToken(token: string) {

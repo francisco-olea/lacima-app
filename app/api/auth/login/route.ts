@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { hashSessionToken, SESSION_COOKIE } from '@/lib/auth'
+import type { AuthRole } from '@/lib/roles'
 
 export const runtime = 'nodejs'
 
@@ -20,13 +21,13 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await db.query<{ id: string; username: string; role: 'admin' | 'cashier' }>(`
+    const result = await db.query<{ id: string; username: string; role: AuthRole }>(`
       SELECT u.id, u.username, r.code AS role
       FROM app.users u
       JOIN app.roles r ON r.id = u.role_id
       WHERE lower(u.username) = lower($1)
         AND u.active = true
-        AND r.code IN ('admin', 'cashier')
+        AND r.code IN ('admin', 'cashier', 'snacks', 'beverages')
         AND u.password_hash = crypt($2, u.password_hash)
       LIMIT 1
     `, [username, password])

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getAuthenticatedUser } from '@/lib/auth'
 import { db } from '@/lib/db'
+import type { AuthRole } from '@/lib/roles'
 
 export const runtime = 'nodejs'
 
@@ -8,10 +9,17 @@ type UserBody = {
   id?: unknown
   name?: unknown
   password?: unknown
+  role?: unknown
 }
+
+type ManagedRole = Extract<AuthRole, 'cashier' | 'snacks' | 'beverages'>
 
 function getName(value: unknown) {
   return typeof value === 'string' ? value.trim() : ''
+}
+
+function getRole(value: unknown): ManagedRole | null {
+  return value === 'cashier' || value === 'snacks' || value === 'beverages' ? value : null
 }
 
 function validName(name: string) {
@@ -29,11 +37,11 @@ export async function GET() {
   try {
     const auth = await requireAdmin()
     if (auth.response) return auth.response
-    const result = await db.query<{ id: string; name: string }>(`
-      SELECT u.id, u.full_name AS name
+    const result = await db.query<{ id: string; name: string; role: ManagedRole }>(`
+      SELECT u.id, u.full_name AS name, r.code AS role
       FROM app.users u
       JOIN app.roles r ON r.id = u.role_id
-      WHERE u.active = true AND r.code = 'cashier'
+      WHERE u.active = true AND r.code IN ('cashier', 'snacks', 'beverages')
       ORDER BY lower(u.full_name)
     `)
     return NextResponse.json({ users: result.rows })
@@ -52,7 +60,9 @@ export async function POST(request: Request) {
   }
   const name = getName(body.name)
   const password = typeof body.password === 'string' ? body.password : ''
+  const role = body.role === undefined ? 'cashier' : getRole(body.role)
   if (!validName(name)) return NextResponse.json({ error: 'Escribe un nombre de hasta 80 caracteres' }, { status: 400 })
+  if (!role) return NextResponse.json({ error: 'Selecciona un rol válido' }, { status: 400 })
   if (password.length < 8 || Buffer.byteLength(password, 'utf8') > 72) {
     return NextResponse.json({ error: 'La contraseña debe tener entre 8 y 72 bytes' }, { status: 400 })
   }
@@ -60,15 +70,15 @@ export async function POST(request: Request) {
   try {
     const auth = await requireAdmin()
     if (auth.response) return auth.response
-    const result = await db.query<{ id: string; name: string }>(`
+    const result = await db.query<{ id: string; name: string; role: ManagedRole }>(`
       INSERT INTO app.users (role_id, username, full_name, password_hash, email)
       SELECT r.id, $1, $1, crypt($2, gen_salt('bf', 12)), NULL
       FROM app.roles r
-      WHERE r.code = 'cashier'
-      RETURNING id, full_name AS name
-    `, [name, password])
+      WHERE r.code = $3
+      RETURNING id, full_name AS name, $3::text AS role
+    `, [name, password, role])
     if (!result.rowCount) {
-      return NextResponse.json({ error: 'No se encontró el rol de Caja' }, { status: 500 })
+      return NextResponse.json({ error: 'No se encontró el rol seleccionado' }, { status: 500 })
     }
     return NextResponse.json({ user: result.rows[0] }, { status: 201 })
   } catch (error) {
@@ -88,7 +98,8 @@ export async function PATCH(request: Request) {
   const id = typeof body.id === 'string' ? body.id : ''
   const name = getName(body.name)
   const password = typeof body.password === 'string' && body.password.length > 0 ? body.password : null
-  if (!id || !validName(name)) return NextResponse.json({ error: 'Datos de usuario inválidos' }, { status: 400 })
+  const role = body.role === undefined ? null : getRole(body.role)
+  if (!id || !validName(name) || (body.role !== undefined && !role)) return NextResponse.json({ error: 'Datos de usuario inválidos' }, { status: 400 })
   if (password && (password.length < 8 || Buffer.byteLength(password, 'utf8') > 72)) {
     return NextResponse.json({ error: 'La contraseña debe tener entre 8 y 72 bytes' }, { status: 400 })
   }
@@ -96,20 +107,21 @@ export async function PATCH(request: Request) {
   try {
     const auth = await requireAdmin()
     if (auth.response) return auth.response
-    const result = await db.query<{ id: string; name: string }>(`
+    const result = await db.query<{ id: string; name: string; role: ManagedRole }>(`
       UPDATE app.users u
       SET username = $2,
           full_name = $2,
           password_hash = CASE WHEN $3::text IS NULL THEN u.password_hash ELSE crypt($3, gen_salt('bf', 12)) END,
+          role_id = COALESCE((SELECT id FROM app.roles WHERE code = $4), u.role_id),
           updated_at = now()
       FROM app.roles r
       WHERE u.id = $1
         AND u.role_id = r.id
-        AND r.code = 'cashier'
+        AND r.code IN ('cashier', 'snacks', 'beverages')
         AND u.active = true
-      RETURNING u.id, u.full_name AS name
-    `, [id, name, password])
-    if (!result.rowCount) return NextResponse.json({ error: 'No se encontró el usuario de Caja' }, { status: 404 })
+      RETURNING u.id, u.full_name AS name, (SELECT code FROM app.roles WHERE id = u.role_id) AS role
+    `, [id, name, password, role])
+    if (!result.rowCount) return NextResponse.json({ error: 'No se encontró el usuario' }, { status: 404 })
     return NextResponse.json({ user: result.rows[0] })
   } catch (error) {
     if (isDuplicateUsername(error)) return NextResponse.json({ error: 'Ya existe un usuario con ese nombre' }, { status: 409 })
@@ -138,7 +150,7 @@ export async function DELETE(request: Request) {
         FROM app.roles r
         WHERE u.id = $1
           AND u.role_id = r.id
-          AND r.code = 'cashier'
+          AND r.code IN ('cashier', 'snacks', 'beverages')
           AND u.active = true
         RETURNING u.id
       ), revoked AS (
@@ -148,7 +160,7 @@ export async function DELETE(request: Request) {
       )
       SELECT id FROM deactivated
     `, [id])
-    if (!result.rowCount) return NextResponse.json({ error: 'No se encontró el usuario de Caja' }, { status: 404 })
+    if (!result.rowCount) return NextResponse.json({ error: 'No se encontró el usuario' }, { status: 404 })
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('No se pudo eliminar el usuario', error)

@@ -34,6 +34,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { currency, type Product } from '@/lib/data'
+import { categoryForRole, type AuthRole } from '@/lib/roles'
 import { cn } from '@/lib/utils'
 
 type CartItem = {
@@ -193,12 +194,15 @@ const FOLIO_SEQUENCE_KEY = 'lc-folio-sequence-v2'
 const SETTINGS_KEY = 'lc-settings'
 const POS_DRAFT_KEY = 'lc-pos-draft-v1'
 
-export function PosTerminal() {
+export function PosTerminal({ role }: { role: AuthRole }) {
+  const allowedCategory = categoryForRole(role)
+  const visibleCategories: readonly Categoria[] = allowedCategory ? [allowedCategory] : categorias
+  const draftStorageKey = `${POS_DRAFT_KEY}-${role}`
   const [products, setProducts] = useState<Product[]>([])
   const [productsLoading, setProductsLoading] = useState(true)
   const [productsError, setProductsError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
-  const [categoria, setCategoria] = useState<Categoria>('Todos')
+  const [categoria, setCategoria] = useState<Categoria>(allowedCategory ?? 'Todos')
   const [cart, setCart] = useState<CartItem[]>([])
   const [descuento, setDescuento] = useState(0)
   const [metodo, setMetodo] = useState<MetodoPago>('Efectivo')
@@ -259,7 +263,7 @@ export function PosTerminal() {
 
   useEffect(() => {
     try {
-      const storedDraft = sessionStorage.getItem(POS_DRAFT_KEY)
+      const storedDraft = sessionStorage.getItem(draftStorageKey)
       if (storedDraft) {
         const parsed: unknown = JSON.parse(storedDraft)
         if (!isPosDraft(parsed)) throw new Error('Los datos de la venta pendiente no son válidos')
@@ -274,7 +278,7 @@ export function PosTerminal() {
       }
     } catch (error) {
       try {
-        sessionStorage.removeItem(POS_DRAFT_KEY)
+        sessionStorage.removeItem(draftStorageKey)
       } catch (removeError) {
         console.error('No se pudo limpiar el borrador de venta inválido', removeError)
       }
@@ -283,7 +287,7 @@ export function PosTerminal() {
     } finally {
       setDraftLoaded(true)
     }
-  }, [])
+  }, [draftStorageKey])
 
   useEffect(() => {
     if (!draftLoaded) return
@@ -298,12 +302,12 @@ export function PosTerminal() {
       splitEnabled,
     }
     try {
-      sessionStorage.setItem(POS_DRAFT_KEY, JSON.stringify(draft))
+      sessionStorage.setItem(draftStorageKey, JSON.stringify(draft))
     } catch (error) {
       console.error('No se pudo guardar la venta pendiente', error)
       toast.error('No se pudo guardar la venta pendiente en esta sesión del navegador')
     }
-  }, [cart, descuento, draftLoaded, metodo, paymentAmount, payments, recibido, splitEnabled, splitPeople])
+  }, [cart, descuento, draftLoaded, draftStorageKey, metodo, paymentAmount, payments, recibido, splitEnabled, splitPeople])
 
   const openCashSession = useCallback(async () => {
     const response = await fetch('/api/cash-sessions', {
@@ -447,13 +451,13 @@ export function PosTerminal() {
 
   const filtered = useMemo(() => {
     return products.filter((p) => {
-      const matchCat = categoria === 'Todos' || p.categoria === categoria
+      const matchCat = allowedCategory ? p.categoria === allowedCategory : categoria === 'Todos' || p.categoria === categoria
       const matchQuery =
         p.nombre.toLowerCase().includes(query.toLowerCase()) ||
         p.codigo.includes(query)
       return p.activo && matchCat && matchQuery
     })
-  }, [query, categoria, products])
+  }, [allowedCategory, query, categoria, products])
 
   function addProduct(p: Product) {
     const currentQuantity = cart.find((item) => item.key === p.id)?.cantidad ?? 0
@@ -1054,7 +1058,7 @@ export function PosTerminal() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {categorias.map((c) => (
+          {visibleCategories.map((c) => (
             <button
               key={c}
               onClick={() => setCategoria(c)}
@@ -1068,15 +1072,17 @@ export function PosTerminal() {
               {c}
             </button>
           ))}
-          <Button
-            variant="outline"
-            size="sm"
-            className="ml-auto gap-1.5"
-            onClick={() => setManualOpen(true)}
-          >
-            <Plus className="size-4" />
-            Sin código
-          </Button>
+          {!allowedCategory && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="ml-auto gap-1.5"
+              onClick={() => setManualOpen(true)}
+            >
+              <Plus className="size-4" />
+              Sin código
+            </Button>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getAuthenticatedUser } from '@/lib/auth'
 import { db } from '@/lib/db'
+import { categoryForRole } from '@/lib/roles'
 
 export const runtime = 'nodejs'
 
@@ -36,6 +37,10 @@ export async function POST(request: Request) {
 
   const user = await getAuthenticatedUser()
   if (!user) return NextResponse.json({ error: 'Inicia sesión para registrar ventas' }, { status: 401 })
+  const allowedCategory = categoryForRole(user.role)
+  if (allowedCategory && body.items.some((item) => !item.sku)) {
+    return NextResponse.json({ error: 'Este punto de venta solo permite productos de su categoría asignada' }, { status: 403 })
+  }
 
   let client: Awaited<ReturnType<typeof db.connect>> | undefined
   try {
@@ -52,10 +57,11 @@ export async function POST(request: Request) {
         LIMIT 1
       )
         AND status = 'open'
+        AND ($2::text IS NULL OR opened_by = $1)
       ORDER BY (opened_by = $1) DESC, opened_at DESC
       LIMIT 1
       FOR UPDATE
-    `, [user.id])
+    `, [user.id, allowedCategory])
     if (cashSession.rowCount === 0) {
       await client.query('ROLLBACK')
       return NextResponse.json({ error: 'No hay un turno abierto en la caja para registrar la venta' }, { status: 409 })
@@ -78,11 +84,21 @@ export async function POST(request: Request) {
     for (const item of body.items) {
       let productId: string | null = null
       if (item.sku) {
-        const product = await client.query<{ id: string; stock: string; track_stock: boolean }>(
-          'SELECT id, stock, track_stock FROM app.products WHERE sku = $1 FOR UPDATE',
+        const product = await client.query<{ id: string; stock: string; track_stock: boolean; category: string; active: boolean }>(`
+          SELECT p.id, p.stock, p.track_stock, c.name AS category, p.active
+          FROM app.products p
+          JOIN app.product_categories c ON c.id = p.category_id
+          WHERE p.sku = $1
+          FOR UPDATE OF p
+        `,
           [item.sku],
         )
         if (product.rowCount === 0) throw new Error(`Producto no encontrado: ${item.sku}`)
+        if (!product.rows[0].active) throw new Error(`Producto no disponible: ${item.sku}`)
+        if (allowedCategory && product.rows[0].category !== allowedCategory) {
+          await client.query('ROLLBACK')
+          return NextResponse.json({ error: 'Este punto de venta solo permite productos de su categoría asignada' }, { status: 403 })
+        }
         productId = product.rows[0].id
         if (product.rows[0].track_stock) {
           const stockBefore = Number(product.rows[0].stock)

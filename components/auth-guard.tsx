@@ -18,9 +18,9 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
           return
         }
         const user = await response.json() as { role?: string }
-        if (user.role === 'cashier' && pathname !== '/pos') {
+        if (user.role !== 'admin' && pathname !== '/pos') {
           router.replace('/pos')
-        } else if (user.role === 'admin' || user.role === 'cashier') {
+        } else if (user.role === 'admin' || user.role === 'cashier' || user.role === 'snacks' || user.role === 'beverages') {
           if (active) setReady(true)
         } else {
           router.replace('/login')

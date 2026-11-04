@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getAuthenticatedUser } from '@/lib/auth'
 import { db } from '@/lib/db'
+import { categoryForRole } from '@/lib/roles'
 
 export const runtime = 'nodejs'
 
@@ -258,18 +259,25 @@ export async function POST(request: Request) {
       stock: string
       trackStock: boolean
       active: boolean
+      category: string
     }>(`
-      SELECT id, sku, name, unit_price AS price, stock,
-             track_stock AS "trackStock", active
-      FROM app.products
-      WHERE id = $1
-      FOR UPDATE
+      SELECT p.id, p.sku, p.name, p.unit_price AS price, p.stock,
+             p.track_stock AS "trackStock", p.active, c.name AS category
+      FROM app.products p
+      JOIN app.product_categories c ON c.id = p.category_id
+      WHERE p.id = $1
+      FOR UPDATE OF p
     `, [body.productId])
     if (!product.rowCount || !product.rows[0].active) {
       await client.query('ROLLBACK')
       return NextResponse.json({ error: 'El producto ya no está disponible' }, { status: 404 })
     }
     const item = product.rows[0]
+    const allowedCategory = categoryForRole(user.role)
+    if (allowedCategory && item.category !== allowedCategory) {
+      await client.query('ROLLBACK')
+      return NextResponse.json({ error: 'Este punto de venta solo permite productos de su categoría asignada' }, { status: 403 })
+    }
     const previousItem = await client.query<{ id: string; quantity: string }>(`
       SELECT id, quantity
       FROM app.open_account_items
@@ -402,6 +410,21 @@ export async function PATCH(request: Request) {
         if (!items.rowCount) {
           await client.query('ROLLBACK')
           return NextResponse.json({ error: 'Agrega artículos antes de cobrar la cuenta' }, { status: 400 })
+        }
+        const allowedCategory = categoryForRole(user.role)
+        if (allowedCategory) {
+          const invalidItems = await client.query<{ count: string }>(`
+            SELECT COUNT(*) AS count
+            FROM app.open_account_items i
+            LEFT JOIN app.products p ON p.id = i.product_id
+            LEFT JOIN app.product_categories c ON c.id = p.category_id
+            WHERE i.account_id = $1
+              AND (p.id IS NULL OR c.name <> $2)
+          `, [body.accountId, allowedCategory])
+          if (Number(invalidItems.rows[0].count) > 0) {
+            await client.query('ROLLBACK')
+            return NextResponse.json({ error: 'La cuenta contiene productos fuera de la categoría asignada' }, { status: 403 })
+          }
         }
         const total = items.rows.reduce((sum, item) => sum + Number(item.lineTotal), 0)
         const paymentsResult = await client.query<{

@@ -14,6 +14,9 @@
 `011_francisco_admin.sql` crea o habilita el usuario Administrador Francisco con una contraseña aleatoria no conocida.
 `012_deactivate_demo_sponsors.sql` desactiva los registros de patrocinadores de demostración.
 `013_open_accounts.sql` agrega cuentas abiertas de clientes y sus artículos.
+`014_user_cash_sessions.sql` vincula turnos de caja al usuario que los abre.
+`015_open_account_payments.sql` registra abonos a cuentas abiertas.
+`016_department_pos_users.sql` crea los usuarios Snacks y Bebidas con acceso limitado a su categoría del punto de venta.
 
 ## Aplicar la migracion
 
@@ -39,6 +42,9 @@ psql -U postgres -d lacima -f database/010_rental_products.sql
 psql -U postgres -d lacima -f database/011_francisco_admin.sql
 psql -U postgres -d lacima -f database/012_deactivate_demo_sponsors.sql
 psql -U postgres -d lacima -f database/013_open_accounts.sql
+psql -U postgres -d lacima -f database/014_user_cash_sessions.sql
+psql -U postgres -d lacima -f database/015_open_account_payments.sql
+psql -U postgres -d lacima -f database/016_department_pos_users.sql
 ```
 
 La migracion es repetible y no borra datos existentes. Requiere permiso para crear la extension `pgcrypto`.
@@ -54,6 +60,8 @@ Son usuarios de la aplicacion almacenados en `app.users`. El acceso utiliza `use
 | Caja | `Paola` | `CajaPaola2026!` |
 | Caja | `Jenny` | `CajaJenny2026!` |
 | Caja | `Andrea` | `CajaAndrea2026!` |
+| Snacks | `Snacks` | Establecer en Configuración > Usuarios |
+| Bebidas | `Bebidas` | Establecer en Configuración > Usuarios |
 
 Cambia las contrasenas antes de usar la aplicacion en un entorno real. Las contrasenas no se guardan en texto plano: el script las convierte a `bcrypt` mediante `pgcrypto`.
 Para asignar la contraseña inicial de Francisco, ejecuta desde `psql` `SELECT app.change_user_password('Francisco', 'ESCRIBE_AQUI_UNA_CLAVE_SEGURA');`.
@@ -63,6 +71,7 @@ Para asignar la contraseña inicial de Francisco, ejecuta desde `psql` `SELECT a
 ```sql
 SELECT code, name FROM app.roles ORDER BY code;
 SELECT username, full_name, active FROM app.users ORDER BY username;
+SELECT u.username, r.code AS role, u.active FROM app.users u JOIN app.roles r ON r.id = u.role_id ORDER BY u.username;
 SELECT sku, name, stock, minimum_stock FROM app.products ORDER BY sku;
 SELECT table_name FROM information_schema.tables WHERE table_schema = 'app' ORDER BY table_name;
 SELECT name, duration_months, price FROM app.membership_plans ORDER BY price;
@@ -76,7 +85,7 @@ SELECT username, full_name, active FROM app.users ORDER BY username;
 SELECT folio, folio_sequence FROM app.sales ORDER BY folio_sequence;
 SELECT r.code AS role, rp.permission_code
 FROM app.roles r JOIN app.role_permissions rp ON rp.role_id = r.id
-WHERE r.code IN ('admin', 'cashier') ORDER BY r.code, rp.permission_code;
+WHERE r.code IN ('admin', 'cashier', 'snacks', 'beverages') ORDER BY r.code, rp.permission_code;
 ```
 
 ## Cambiar contraseñas manualmente
@@ -90,4 +99,4 @@ SELECT app.change_user_password('Denisse', 'NUEVA_CONTRASENA_SEGURA');
 
 Reemplaza los valores antes de ejecutar. La contraseña se transforma con `crypt(..., gen_salt('bf', 12))`; en `app.users.password_hash` sólo queda el hash bcrypt. La función exige al menos 8 caracteres y falla si el usuario no existe.
 
-La interfaz actual aun usa datos mock y `sessionStorage`; este script prepara la persistencia, pero para autenticar contra PostgreSQL hace falta agregar una API/ORM al proyecto y reemplazar esa validacion del frontend.
+Los usuarios Snacks y Bebidas se crean con una contraseña aleatoria que no se muestra ni se guarda en texto plano; el administrador debe asignarles una contraseña desde Configuración > Usuarios antes de iniciar sesión.

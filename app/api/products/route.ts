@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
+import { getAuthenticatedUser } from '@/lib/auth'
 import { db } from '@/lib/db'
+import { categoryForRole } from '@/lib/roles'
 
 export const runtime = 'nodejs'
 
@@ -31,6 +33,9 @@ function toProduct(row: ProductRow) {
 
 export async function GET() {
   try {
+    const user = await getAuthenticatedUser()
+    if (!user) return NextResponse.json({ error: 'Inicia sesión para consultar el inventario' }, { status: 401 })
+    const category = categoryForRole(user.role)
     const result = await db.query<ProductRow>(`
       SELECT p.id, p.sku AS codigo, p.name AS nombre, c.name AS categoria,
              CASE
@@ -45,8 +50,9 @@ export async function GET() {
       FROM app.products p
       JOIN app.product_categories c ON c.id = p.category_id
       WHERE p.active = true
+        AND ($1::text IS NULL OR c.name = $1)
       ORDER BY p.name
-    `)
+    `, [category])
     return NextResponse.json(result.rows.map(toProduct), {
       headers: { 'Cache-Control': 'no-store' },
     })
@@ -56,7 +62,16 @@ export async function GET() {
   }
 }
 
+async function requireAdmin() {
+  const user = await getAuthenticatedUser()
+  if (!user) return NextResponse.json({ error: 'Inicia sesión para continuar' }, { status: 401 })
+  if (user.role !== 'admin') return NextResponse.json({ error: 'No tienes permiso para modificar el inventario' }, { status: 403 })
+  return null
+}
+
 export async function POST(request: Request) {
+  const authorizationError = await requireAdmin()
+  if (authorizationError) return authorizationError
   const body = await request.json() as {
     codigo?: string
     nombre?: string
@@ -131,6 +146,8 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
+  const authorizationError = await requireAdmin()
+  if (authorizationError) return authorizationError
   const body = await request.json() as {
     codigo?: string
     nombre?: string
@@ -234,6 +251,8 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const authorizationError = await requireAdmin()
+  if (authorizationError) return authorizationError
   const body = await request.json() as { codigo?: string }
   if (!body.codigo?.trim()) {
     return NextResponse.json({ error: 'Producto inválido' }, { status: 400 })

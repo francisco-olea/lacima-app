@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { getAuthenticatedUser } from '@/lib/auth'
 import { db } from '@/lib/db'
 
 export const runtime = 'nodejs'
@@ -20,6 +21,9 @@ type RouteContext = {
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export async function GET(_request: Request, context: RouteContext) {
+  const user = await getAuthenticatedUser()
+  if (!user) return NextResponse.json({ error: 'Inicia sesión para continuar' }, { status: 401 })
+  if (user.role !== 'admin') return NextResponse.json({ error: 'No tienes permiso para consultar el historial del inventario' }, { status: 403 })
   const { id } = await context.params
   if (!uuidPattern.test(id)) {
     return NextResponse.json({ error: 'Producto inválido' }, { status: 400 })

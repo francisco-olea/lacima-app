@@ -16,3 +16,4 @@
 \ir 013_open_accounts.sql
 \ir 014_user_cash_sessions.sql
 \ir 015_open_account_payments.sql
+\ir 016_department_pos_users.sql

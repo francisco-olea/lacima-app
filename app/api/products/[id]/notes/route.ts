@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { getAuthenticatedUser } from '@/lib/auth'
 import { db } from '@/lib/db'
 
 export const runtime = 'nodejs'
@@ -21,6 +22,9 @@ async function getProductId(context: RouteContext) {
 }
 
 export async function GET(_request: Request, context: RouteContext) {
+  const user = await getAuthenticatedUser()
+  if (!user) return NextResponse.json({ error: 'Inicia sesión para continuar' }, { status: 401 })
+  if (user.role !== 'admin') return NextResponse.json({ error: 'No tienes permiso para consultar notas de inventario' }, { status: 403 })
   const productId = await getProductId(context)
   if (!productId) {
     return NextResponse.json({ error: 'Artículo inválido' }, { status: 400 })
@@ -56,6 +60,9 @@ export async function GET(_request: Request, context: RouteContext) {
 }
 
 export async function POST(request: Request, context: RouteContext) {
+  const user = await getAuthenticatedUser()
+  if (!user) return NextResponse.json({ error: 'Inicia sesión para continuar' }, { status: 401 })
+  if (user.role !== 'admin') return NextResponse.json({ error: 'No tienes permiso para modificar notas de inventario' }, { status: 403 })
   const productId = await getProductId(context)
   if (!productId) {
     return NextResponse.json({ error: 'Artículo inválido' }, { status: 400 })

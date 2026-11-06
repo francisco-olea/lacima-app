@@ -5,7 +5,7 @@ export type Product = {
   id: string
   codigo: string
   nombre: string
-  categoria: 'Bebidas' | 'Snacks' | 'Equipo' | 'Ropa' | 'Servicios'
+  categoria: 'Bebidas' | 'Snacks' | 'Licuados' | 'Equipo' | 'Ropa' | 'Servicios'
   tipo: 'Inventario' | 'Renta' | 'Servicio'
   precio: number
   existencias: number

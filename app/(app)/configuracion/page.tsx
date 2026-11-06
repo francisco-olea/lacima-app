@@ -221,8 +221,8 @@ export default function ConfiguracionPage() {
                     <Label htmlFor="user-role">Punto de venta</Label>
                     <select id="user-role" value={userForm.role} onChange={(event) => setUserForm((current) => ({ ...current, role: event.target.value as ManagedRole }))} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
                       <option value="cashier">Caja general</option>
-                      <option value="snacks">Snacks</option>
-                      <option value="beverages">Bebidas</option>
+                      <option value="snacks">Snack y Bebidas</option>
+                      <option value="beverages">Licuados</option>
                     </select>
                   </div>
                   <div className="space-y-2">
@@ -239,7 +239,7 @@ export default function ConfiguracionPage() {
             <div className="divide-y divide-border rounded-xl border border-border">
               {loadingUsers ? <p className="p-4 text-sm text-muted-foreground">Cargando usuarios…</p> : cashierUsers.length === 0 ? <p className="p-4 text-sm text-muted-foreground">No hay usuarios de Punto de Venta registrados.</p> : cashierUsers.map((user) => <div key={user.id} className="flex flex-wrap items-center gap-3 p-4"><div className="flex size-10 items-center justify-center rounded-full bg-primary/15 text-primary"><UserCog className="size-5" /></div><div className="min-w-0 flex-1"><p className="font-medium">{user.name}</p></div><Badge variant="secondary">{roleLabel(user.role)}</Badge><Badge className="gap-1 bg-accent/15 text-accent"><Check className="size-3" /> Activo</Badge><Button variant="ghost" size="icon" aria-label={`Editar ${user.name}`} onClick={() => openEditUserForm(user)}><Pencil className="size-4" /></Button><Button variant="ghost" size="icon" aria-label={`Eliminar ${user.name}`} onClick={() => deleteUser(user)}><Trash2 className="size-4 text-destructive" /></Button></div>)}
             </div>
-            <p className="mt-4 text-sm text-muted-foreground">Las contraseñas se guardan cifradas. Establece aquí la contraseña inicial de Snacks y Bebidas. Al eliminar un usuario se conserva el historial de sus operaciones y se revoca su acceso.</p>
+            <p className="mt-4 text-sm text-muted-foreground">Las contraseñas se guardan cifradas. Establece aquí la contraseña inicial de Snack y Bebidas y Licuados. Al eliminar un usuario se conserva el historial de sus operaciones y se revoca su acceso.</p>
             <div className="mt-6 border-t border-border pt-5">
               <h3 className="mb-3 text-base font-semibold">Turnos de caja</h3>
               <div className="grid gap-2 sm:grid-cols-2">

@@ -26,7 +26,7 @@ JOIN app.roles r ON r.code = seed.role_code
 WHERE NOT EXISTS (
   SELECT 1
   FROM app.users u
-  WHERE lower(u.username) = lower(seed.username)
+  WHERE u.role_id = r.id
 )
 ON CONFLICT DO NOTHING;
 

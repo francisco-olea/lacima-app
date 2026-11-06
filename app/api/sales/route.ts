@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getAuthenticatedUser } from '@/lib/auth'
 import { db } from '@/lib/db'
-import { categoryForRole } from '@/lib/roles'
+import { categoriesForRole } from '@/lib/roles'
 
 export const runtime = 'nodejs'
 
@@ -37,8 +37,8 @@ export async function POST(request: Request) {
 
   const user = await getAuthenticatedUser()
   if (!user) return NextResponse.json({ error: 'Inicia sesión para registrar ventas' }, { status: 401 })
-  const allowedCategory = categoryForRole(user.role)
-  if (allowedCategory && body.items.some((item) => !item.sku)) {
+  const allowedCategories = categoriesForRole(user.role)
+  if (allowedCategories && body.items.some((item) => !item.sku)) {
     return NextResponse.json({ error: 'Este punto de venta solo permite productos de su categoría asignada' }, { status: 403 })
   }
 
@@ -57,11 +57,11 @@ export async function POST(request: Request) {
         LIMIT 1
       )
         AND status = 'open'
-        AND ($2::text IS NULL OR opened_by = $1)
+        AND ($2::boolean IS FALSE OR opened_by = $1)
       ORDER BY (opened_by = $1) DESC, opened_at DESC
       LIMIT 1
       FOR UPDATE
-    `, [user.id, allowedCategory])
+    `, [user.id, allowedCategories !== null])
     if (cashSession.rowCount === 0) {
       await client.query('ROLLBACK')
       return NextResponse.json({ error: 'No hay un turno abierto en la caja para registrar la venta' }, { status: 409 })
@@ -95,7 +95,7 @@ export async function POST(request: Request) {
         )
         if (product.rowCount === 0) throw new Error(`Producto no encontrado: ${item.sku}`)
         if (!product.rows[0].active) throw new Error(`Producto no disponible: ${item.sku}`)
-        if (allowedCategory && product.rows[0].category !== allowedCategory) {
+        if (allowedCategories && !allowedCategories.some((category) => category === product.rows[0].category)) {
           await client.query('ROLLBACK')
           return NextResponse.json({ error: 'Este punto de venta solo permite productos de su categoría asignada' }, { status: 403 })
         }

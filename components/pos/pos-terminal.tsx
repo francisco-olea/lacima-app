@@ -34,7 +34,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { currency, type Product } from '@/lib/data'
-import { categoryForRole, type AuthRole } from '@/lib/roles'
+import { categoriesForRole, type AuthRole } from '@/lib/roles'
 import { cn } from '@/lib/utils'
 
 type CartItem = {
@@ -60,7 +60,7 @@ type VentaTurno = {
   pagos: Pago[]
 }
 
-const categorias = ['Todos', 'Bebidas', 'Snacks', 'Equipo', 'Ropa', 'Servicios'] as const
+const categorias = ['Todos', 'Bebidas', 'Snacks', 'Licuados', 'Equipo', 'Ropa', 'Servicios'] as const
 type Categoria = (typeof categorias)[number]
 type MetodoPago = 'Efectivo' | 'Tarjeta' | 'Transferencia'
 type PanelTab = 'carrito' | 'cuentas' | 'tickets'
@@ -195,14 +195,18 @@ const SETTINGS_KEY = 'lc-settings'
 const POS_DRAFT_KEY = 'lc-pos-draft-v1'
 
 export function PosTerminal({ role }: { role: AuthRole }) {
-  const allowedCategory = categoryForRole(role)
-  const visibleCategories: readonly Categoria[] = allowedCategory ? [allowedCategory] : categorias
+  const allowedCategories = categoriesForRole(role)
+  const visibleCategories: readonly Categoria[] = allowedCategories
+    ? allowedCategories.length > 1 ? ['Todos', ...allowedCategories] : allowedCategories
+    : categorias
   const draftStorageKey = `${POS_DRAFT_KEY}-${role}`
   const [products, setProducts] = useState<Product[]>([])
   const [productsLoading, setProductsLoading] = useState(true)
   const [productsError, setProductsError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
-  const [categoria, setCategoria] = useState<Categoria>(allowedCategory ?? 'Todos')
+  const [categoria, setCategoria] = useState<Categoria>(
+    allowedCategories?.length === 1 ? allowedCategories[0] : 'Todos',
+  )
   const [cart, setCart] = useState<CartItem[]>([])
   const [descuento, setDescuento] = useState(0)
   const [metodo, setMetodo] = useState<MetodoPago>('Efectivo')
@@ -451,13 +455,15 @@ export function PosTerminal({ role }: { role: AuthRole }) {
 
   const filtered = useMemo(() => {
     return products.filter((p) => {
-      const matchCat = allowedCategory ? p.categoria === allowedCategory : categoria === 'Todos' || p.categoria === categoria
+      const matchAllowedCategory = !allowedCategories
+        || allowedCategories.some((allowedCategory) => allowedCategory === p.categoria)
+      const matchSelectedCategory = categoria === 'Todos' || p.categoria === categoria
       const matchQuery =
         p.nombre.toLowerCase().includes(query.toLowerCase()) ||
         p.codigo.includes(query)
-      return p.activo && matchCat && matchQuery
+      return p.activo && matchAllowedCategory && matchSelectedCategory && matchQuery
     })
-  }, [allowedCategory, query, categoria, products])
+  }, [allowedCategories, query, categoria, products])
 
   function addProduct(p: Product) {
     const currentQuantity = cart.find((item) => item.key === p.id)?.cantidad ?? 0
@@ -1072,7 +1078,7 @@ export function PosTerminal({ role }: { role: AuthRole }) {
               {c}
             </button>
           ))}
-          {!allowedCategory && (
+          {!allowedCategories && (
             <Button
               variant="outline"
               size="sm"

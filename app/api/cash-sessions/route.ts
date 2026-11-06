@@ -228,6 +228,19 @@ export async function POST(request: Request) {
     })
   } catch (error) {
     await client.query('ROLLBACK')
+    if (
+      typeof error === 'object'
+      && error !== null
+      && 'code' in error
+      && error.code === '23505'
+      && 'constraint' in error
+      && error.constraint === 'one_open_session_per_register'
+    ) {
+      console.error('La base de datos conserva el índice antiguo de turnos abiertos', error)
+      return NextResponse.json({
+        error: 'La base de datos requiere actualizar el índice de turnos abiertos. Ejecuta database/018_fix_open_cash_session_index.sql.',
+      }, { status: 409 })
+    }
     console.error('POST /api/cash-sessions failed', error)
     return NextResponse.json({ error: 'No se pudo actualizar el turno de caja' }, { status: 503 })
   } finally {

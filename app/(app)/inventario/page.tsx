@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { currency, type Product } from '@/lib/data'
 import { toast } from 'sonner'
 
-const categorias = ['Todos', 'Bebidas', 'Snacks', 'Equipo', 'Ropa', 'Servicios'] as const
+const categorias = ['Todos', 'Bebidas', 'Snacks', 'Licuados', 'Equipo', 'Ropa', 'Servicios'] as const
 
 type Categoria = (typeof categorias)[number]
 type ProductNote = {

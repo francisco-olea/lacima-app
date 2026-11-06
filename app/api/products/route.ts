@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getAuthenticatedUser } from '@/lib/auth'
 import { db } from '@/lib/db'
-import { categoryForRole } from '@/lib/roles'
+import { categoriesForRole } from '@/lib/roles'
 
 export const runtime = 'nodejs'
 
@@ -35,7 +35,7 @@ export async function GET() {
   try {
     const user = await getAuthenticatedUser()
     if (!user) return NextResponse.json({ error: 'Inicia sesión para consultar el inventario' }, { status: 401 })
-    const category = categoryForRole(user.role)
+    const categories = categoriesForRole(user.role)
     const result = await db.query<ProductRow>(`
       SELECT p.id, p.sku AS codigo, p.name AS nombre, c.name AS categoria,
              CASE
@@ -50,9 +50,9 @@ export async function GET() {
       FROM app.products p
       JOIN app.product_categories c ON c.id = p.category_id
       WHERE p.active = true
-        AND ($1::text IS NULL OR c.name = $1)
+        AND ($1::text[] IS NULL OR c.name = ANY($1::text[]))
       ORDER BY p.name
-    `, [category])
+    `, [categories])
     return NextResponse.json(result.rows.map(toProduct), {
       headers: { 'Cache-Control': 'no-store' },
     })

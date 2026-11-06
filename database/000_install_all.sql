@@ -17,3 +17,5 @@
 \ir 014_user_cash_sessions.sql
 \ir 015_open_account_payments.sql
 \ir 016_department_pos_users.sql
+\ir 017_snack_beverage_smoothie_users.sql
+\ir 018_fix_open_cash_session_index.sql

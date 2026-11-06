@@ -58,6 +58,12 @@ type ReportData = {
   }[]
   sponsors: { active: number; hoursUsed: number; hoursTotal: number }
 }
+type WeeklySalesReport = {
+  weekStart: string
+  weekEnd: string
+  sales: ReportSale[]
+  total: number
+}
 type ProductDailySales = { fecha: string; unidades: number; ventas: number }
 type ProductTrend = { product: ReportProduct; dailySales: ProductDailySales[] }
 
@@ -122,6 +128,11 @@ export default function ReportesPage() {
   const [report, setReport] = useState<ReportData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [selectedWeekDate, setSelectedWeekDate] = useState('')
+  const [weeklySales, setWeeklySales] = useState<WeeklySalesReport | null>(null)
+  const [weeklySalesLoading, setWeeklySalesLoading] = useState(false)
+  const [weeklySalesError, setWeeklySalesError] = useState<string | null>(null)
+  const [weeklySalesRefresh, setWeeklySalesRefresh] = useState(0)
   const [selectedProductId, setSelectedProductId] = useState('')
   const [selectedMonth, setSelectedMonth] = useState('')
   const [productTrend, setProductTrend] = useState<ProductTrend | null>(null)
@@ -142,6 +153,8 @@ export default function ReportesPage() {
       }
       const result = await response.json() as ReportData
       setReport(result)
+      setSelectedWeekDate((current) => current || result.date)
+      setWeeklySalesRefresh((current) => current + 1)
       setSelectedMonth((current) => current || result.date.slice(0, 7))
       setSelectedProductId((current) => (
         result.products.some((product) => product.id === current)
@@ -160,6 +173,38 @@ export default function ReportesPage() {
   useEffect(() => {
     void loadReport()
   }, [loadReport])
+
+  useEffect(() => {
+    if (!selectedWeekDate) return
+
+    const controller = new AbortController()
+    async function loadWeeklySales() {
+      setWeeklySalesLoading(true)
+      setWeeklySalesError(null)
+      setWeeklySales(null)
+      try {
+        const response = await fetch(
+          `/api/reports/weekly-sales?date=${encodeURIComponent(selectedWeekDate)}`,
+          { cache: 'no-store', signal: controller.signal },
+        )
+        if (!response.ok) {
+          const result = await response.json() as { error?: string }
+          throw new Error(result.error ?? 'No se pudieron cargar las ventas de la semana')
+        }
+        setWeeklySales(await response.json() as WeeklySalesReport)
+      } catch (cause) {
+        if (controller.signal.aborted) return
+        const message = cause instanceof Error ? cause.message : 'No se pudieron cargar las ventas de la semana'
+        setWeeklySalesError(message)
+        toast.error(message)
+      } finally {
+        if (!controller.signal.aborted) setWeeklySalesLoading(false)
+      }
+    }
+
+    void loadWeeklySales()
+    return () => controller.abort()
+  }, [selectedWeekDate, weeklySalesRefresh])
 
   useEffect(() => {
     if (!selectedProductId) {
@@ -216,9 +261,9 @@ export default function ReportesPage() {
   ), [productTrend?.dailySales])
 
   function exportCsv() {
-    if (!report) return
+    if (!weeklySales) return
     const header = 'Folio,Fecha,Metodo,Articulos,Total'
-    const rows = report.sales.map((sale) => [
+    const rows = weeklySales.sales.map((sale) => [
       sale.folio,
       formatDateTime(sale.fecha),
       paymentMethod(sale),
@@ -229,7 +274,7 @@ export default function ReportesPage() {
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `reporte-ventas-${report.date}.csv`
+    link.download = `reporte-ventas-${weeklySales.weekStart}-${weeklySales.weekEnd}.csv`
     link.click()
     URL.revokeObjectURL(url)
   }
@@ -282,7 +327,7 @@ export default function ReportesPage() {
             <RefreshCw className="size-4" />
             <span className="hidden sm:inline">Actualizar</span>
           </Button>
-          <Button variant="outline" onClick={exportCsv} disabled={loading || !report} className="gap-2">
+          <Button variant="outline" onClick={exportCsv} disabled={weeklySalesLoading || !weeklySales} className="gap-2">
             <Download className="size-4" />
             <span className="hidden sm:inline">Exportar CSV</span>
           </Button>
@@ -584,13 +629,43 @@ export default function ReportesPage() {
       </section>
 
       <Card className="overflow-hidden p-0">
-        <div className="flex items-center gap-3 border-b border-border px-5 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border px-5 py-4">
           <Receipt className="size-5 text-primary" />
-          <div>
+          <div className="mr-auto">
             <h2 className="text-lg font-semibold">Detalle de ventas</h2>
-            <p className="text-sm text-muted-foreground">Ventas completadas registradas hoy en la base de datos.</p>
+            <p className="text-sm text-muted-foreground">Ventas completadas de lunes a domingo.</p>
+          </div>
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <span>Semana de ventas</span>
+            <input
+              type="date"
+              aria-label="Seleccionar una fecha de la semana de ventas"
+              value={selectedWeekDate}
+              max={report?.date}
+              onChange={(event) => {
+                if (event.target.value) setSelectedWeekDate(event.target.value)
+              }}
+              disabled={loading || !report}
+              className="h-10 rounded-lg border border-input bg-background px-3 text-sm"
+            />
+          </label>
+          <div className="min-w-36 text-right">
+            <p className="text-xs text-muted-foreground">
+              {weeklySales ? `${formatDate(weeklySales.weekStart)} – ${formatDate(weeklySales.weekEnd)}` : 'Total semanal'}
+            </p>
+            <p className="text-lg font-semibold text-primary">
+              {weeklySalesLoading ? '…' : weeklySales ? currency(weeklySales.total) : '—'}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {weeklySales ? `${weeklySales.sales.length} tickets completados` : 'Ventas de la semana'}
+            </p>
           </div>
         </div>
+        {weeklySalesError && (
+          <p role="alert" className="border-b border-destructive/30 bg-destructive/5 px-5 py-3 text-sm text-destructive">
+            {weeklySalesError}
+          </p>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-left text-sm">
             <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
@@ -604,7 +679,7 @@ export default function ReportesPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {report?.sales.map((sale) => (
+              {weeklySales?.sales.map((sale) => (
                 <tr key={sale.id} className="hover:bg-muted/30">
                   <td className="px-5 py-3 font-mono font-semibold text-primary">{sale.folio}</td>
                   <td className="px-5 py-3 text-muted-foreground">{formatDateTime(sale.fecha)}</td>
@@ -621,7 +696,7 @@ export default function ReportesPage() {
                       className="gap-2 text-destructive hover:text-destructive"
                       aria-label={`Eliminar ticket ${sale.folio}`}
                       title={`Eliminar ticket ${sale.folio}`}
-                      disabled={loading}
+                      disabled={loading || weeklySalesLoading}
                       onClick={() => {
                         setDeleteConfirmation('')
                         setSaleToDelete(sale)
@@ -633,16 +708,23 @@ export default function ReportesPage() {
                   </td>
                 </tr>
               ))}
-              {!loading && report?.sales.length === 0 && (
+              {!loading && !weeklySalesLoading && weeklySales?.sales.length === 0 && (
                 <tr>
                   <td colSpan={6} className="px-5 py-10 text-center text-muted-foreground">
-                    No hay ventas completadas registradas hoy.
+                    No hay ventas completadas registradas en esta semana.
                   </td>
                 </tr>
               )}
-              {loading && (
+              {(loading || weeklySalesLoading) && (
                 <tr>
                   <td colSpan={6} className="px-5 py-10 text-center text-muted-foreground">Cargando ventas…</td>
+                </tr>
+              )}
+              {weeklySalesError && !weeklySalesLoading && (
+                <tr>
+                  <td colSpan={6} className="px-5 py-10 text-center text-destructive">
+                    No se pudieron cargar las ventas de esta semana.
+                  </td>
                 </tr>
               )}
             </tbody>

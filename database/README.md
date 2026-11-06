@@ -16,7 +16,9 @@
 `013_open_accounts.sql` agrega cuentas abiertas de clientes y sus artículos.
 `014_user_cash_sessions.sql` vincula turnos de caja al usuario que los abre.
 `015_open_account_payments.sql` registra abonos a cuentas abiertas.
-`016_department_pos_users.sql` crea los usuarios Snacks y Bebidas con acceso limitado a su categoría del punto de venta.
+`016_department_pos_users.sql` crea usuarios iniciales para los puntos de venta de Snacks y Bebidas.
+`017_snack_beverage_smoothie_users.sql` cambia los usuarios a Snack y Bebidas y Licuados, y agrega la categoría Licuados.
+`018_fix_open_cash_session_index.sql` elimina cualquier restricción antigua que solo permitía un turno abierto por caja y asegura un turno abierto por usuario y caja.
 
 ## Aplicar la migracion
 
@@ -45,6 +47,8 @@ psql -U postgres -d lacima -f database/013_open_accounts.sql
 psql -U postgres -d lacima -f database/014_user_cash_sessions.sql
 psql -U postgres -d lacima -f database/015_open_account_payments.sql
 psql -U postgres -d lacima -f database/016_department_pos_users.sql
+psql -U postgres -d lacima -f database/017_snack_beverage_smoothie_users.sql
+psql -U postgres -d lacima -f database/018_fix_open_cash_session_index.sql
 ```
 
 La migracion es repetible y no borra datos existentes. Requiere permiso para crear la extension `pgcrypto`.
@@ -60,8 +64,8 @@ Son usuarios de la aplicacion almacenados en `app.users`. El acceso utiliza `use
 | Caja | `Paola` | `CajaPaola2026!` |
 | Caja | `Jenny` | `CajaJenny2026!` |
 | Caja | `Andrea` | `CajaAndrea2026!` |
-| Snacks | `Snacks` | Establecer en Configuración > Usuarios |
-| Bebidas | `Bebidas` | Establecer en Configuración > Usuarios |
+| Snack y Bebidas | `Snack y Bebidas` | Establecer en Configuración > Usuarios |
+| Licuados | `Licuados` | Establecer en Configuración > Usuarios |
 
 Cambia las contrasenas antes de usar la aplicacion en un entorno real. Las contrasenas no se guardan en texto plano: el script las convierte a `bcrypt` mediante `pgcrypto`.
 Para asignar la contraseña inicial de Francisco, ejecuta desde `psql` `SELECT app.change_user_password('Francisco', 'ESCRIBE_AQUI_UNA_CLAVE_SEGURA');`.
@@ -70,6 +74,7 @@ Para asignar la contraseña inicial de Francisco, ejecuta desde `psql` `SELECT a
 
 ```sql
 SELECT code, name FROM app.roles ORDER BY code;
+SELECT name, active FROM app.product_categories ORDER BY name;
 SELECT username, full_name, active FROM app.users ORDER BY username;
 SELECT u.username, r.code AS role, u.active FROM app.users u JOIN app.roles r ON r.id = u.role_id ORDER BY u.username;
 SELECT sku, name, stock, minimum_stock FROM app.products ORDER BY sku;

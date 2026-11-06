@@ -80,9 +80,9 @@ export function AppShell({ children, role: initialRole }: { children: React.Reac
 
   const isAdmin = role === 'admin'
   const posLabel = role === 'snacks'
-    ? 'Punto de Venta · Snacks'
+    ? 'Punto de Venta · Snack y Bebidas'
     : role === 'beverages'
-      ? 'Punto de Venta · Bebidas'
+      ? 'Punto de Venta · Licuados'
       : 'Punto de Venta'
   const visiblePrimaryNav = isAdmin
     ? PRIMARY_NAV
@@ -215,7 +215,7 @@ export function AppShell({ children, role: initialRole }: { children: React.Reac
               aria-current={active ? 'page' : undefined}
             >
               <Icon className={cn('size-5', active && 'drop-shadow-sm')} />
-              <span className="truncate">{item.href === '/pos' && role === 'snacks' ? 'Snacks' : item.href === '/pos' && role === 'beverages' ? 'Bebidas' : item.label === 'Punto de Venta' ? 'Venta' : item.label}</span>
+              <span className="truncate">{item.href === '/pos' && role === 'snacks' ? 'Snack y Bebidas' : item.href === '/pos' && role === 'beverages' ? 'Licuados' : item.label === 'Punto de Venta' ? 'Venta' : item.label}</span>
             </Link>
           )
         })}

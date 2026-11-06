@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getAuthenticatedUser } from '@/lib/auth'
 import { db } from '@/lib/db'
-import { categoryForRole } from '@/lib/roles'
+import { categoriesForRole } from '@/lib/roles'
 
 export const runtime = 'nodejs'
 
@@ -273,8 +273,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'El producto ya no está disponible' }, { status: 404 })
     }
     const item = product.rows[0]
-    const allowedCategory = categoryForRole(user.role)
-    if (allowedCategory && item.category !== allowedCategory) {
+    const allowedCategories = categoriesForRole(user.role)
+    if (allowedCategories && !allowedCategories.some((category) => category === item.category)) {
       await client.query('ROLLBACK')
       return NextResponse.json({ error: 'Este punto de venta solo permite productos de su categoría asignada' }, { status: 403 })
     }
@@ -411,16 +411,16 @@ export async function PATCH(request: Request) {
           await client.query('ROLLBACK')
           return NextResponse.json({ error: 'Agrega artículos antes de cobrar la cuenta' }, { status: 400 })
         }
-        const allowedCategory = categoryForRole(user.role)
-        if (allowedCategory) {
+        const allowedCategories = categoriesForRole(user.role)
+        if (allowedCategories) {
           const invalidItems = await client.query<{ count: string }>(`
             SELECT COUNT(*) AS count
             FROM app.open_account_items i
             LEFT JOIN app.products p ON p.id = i.product_id
             LEFT JOIN app.product_categories c ON c.id = p.category_id
             WHERE i.account_id = $1
-              AND (p.id IS NULL OR c.name <> $2)
-          `, [body.accountId, allowedCategory])
+              AND (p.id IS NULL OR NOT (c.name = ANY($2::text[])))
+          `, [body.accountId, allowedCategories])
           if (Number(invalidItems.rows[0].count) > 0) {
             await client.query('ROLLBACK')
             return NextResponse.json({ error: 'La cuenta contiene productos fuera de la categoría asignada' }, { status: 403 })
